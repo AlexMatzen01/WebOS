@@ -1,0 +1,145 @@
+:root {
+  --bg: #111827;
+  --surface: #1f2937;
+  --surface-soft: #374151;
+  --text: #f9fafb;
+  --accent: #22d3ee;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+  background: radial-gradient(circle at top, #1e3a8a, var(--bg) 50%);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+#desktop {
+  min-height: 100vh;
+  padding: 0.8rem;
+}
+
+#topbar {
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 0.7rem;
+  padding: 0.55rem 0.8rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  backdrop-filter: blur(4px);
+}
+
+#icon-grid {
+  margin-top: 1rem;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  max-width: 720px;
+}
+
+.desktop-icon {
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 0.65rem;
+  background: rgba(31, 41, 55, 0.8);
+  color: var(--text);
+  padding: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.window {
+  position: fixed;
+  top: 15%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(900px, 94vw);
+  max-height: 78vh;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  border-radius: 0.8rem;
+  overflow: hidden;
+  background: rgba(15, 23, 42, 0.95);
+  box-shadow: 0 30px 60px rgba(2, 6, 23, 0.65);
+  z-index: 10;
+}
+
+.window-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--surface-soft);
+  padding: 0.55rem 0.75rem;
+}
+
+.window-body {
+  padding: 0.75rem;
+  overflow: auto;
+  max-height: calc(78vh - 48px);
+}
+
+.close {
+  border: none;
+  background: transparent;
+  color: #fca5a5;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.panel {
+  background: var(--surface);
+  border-radius: 0.6rem;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.terminal-output {
+  background: #020617;
+  border-radius: 0.6rem;
+  padding: 0.7rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  min-height: 250px;
+  white-space: pre-wrap;
+}
+
+.row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+input, textarea, select, button {
+  font: inherit;
+}
+
+input, textarea, select {
+  width: 100%;
+  border: 1px solid #475569;
+  border-radius: 0.4rem;
+  background: #0f172a;
+  color: var(--text);
+  padding: 0.45rem;
+}
+
+textarea {
+  min-height: 220px;
+}
+
+button {
+  border: 1px solid #475569;
+  border-radius: 0.45rem;
+  background: #0f172a;
+  color: var(--text);
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+}
+
+.file-list { list-style: none; padding: 0; margin: 0; }
+.file-list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.small { color: #cbd5e1; font-size: 0.87rem; }
+.link-btn { text-decoration: underline; background: transparent; border: none; padding: 0; }

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LocalOS</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="desktop">
+    <header id="topbar">
+      <strong>LocalOS</strong>
+      <span id="clock"></span>
+    </header>
+    <main id="icon-grid">
+      <button class="desktop-icon" data-app="terminal">Terminal</button>
+      <button class="desktop-icon" data-app="files">Files</button>
+      <button class="desktop-icon" data-app="settings">Settings</button>
+      <button class="desktop-icon" data-app="browser">Browser</button>
+      <button class="desktop-icon" data-app="editor">Script Editor</button>
+    </main>
+  </div>
+
+  <template id="window-template">
+    <section class="window">
+      <div class="window-header">
+        <span class="window-title"></span>
+        <button class="close">✕</button>
+      </div>
+      <div class="window-body"></div>
+    </section>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
