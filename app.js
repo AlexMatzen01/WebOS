@@ -23,6 +23,7 @@ const defaultFS = {
 const state = {
   fs: loadFS(),
   settings: loadSettings(),
+  cwd: '/home'
 };
 
 function loadFS() {
@@ -37,6 +38,26 @@ function loadSettings() {
 
 function saveFS() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.fs));
+}
+
+function resolvePath(path) {
+  if (!path) return state.cwd;
+
+  // absolute path
+  if (path.startsWith('/')) return path;
+
+  // ..
+  if (path === '..') {
+    const parts = state.cwd.split('/').filter(Boolean);
+    parts.pop();
+    return parts.length ? '/' + parts.join('/') : '/';
+  }
+
+  // .
+  if (path === '.') return state.cwd;
+
+  // relative
+  return `${state.cwd === '/' ? '' : state.cwd}/${path}`;
 }
 
 function saveSettings() {
@@ -91,34 +112,61 @@ function terminalCommand(input, stdout) {
 
   switch (cmd) {
     case 'help':
-      stdout('Commands: help, ls [dir], cat <file>, write <file> <text>, mkdir <dir>, touch <file>, run <path>, exec <path>, clear');
+      stdout('Commands: help, ls [dir], cat <file>, write <file> <text>, mkdir <dir>, touch <file>, run <path>, exec <path>, clear, cd <dir>');
       break;
     case 'ls': {
-      const path = target || '/';
+      const path = resolvePath(target);
       const items = childrenOf(path);
-      stdout(items.length ? items.map((p) => `${p} (${state.fs[p].kind || state.fs[p].type})`).join('\n') : '(empty)');
+
+      if (!state.fs[path] || state.fs[path].type !== 'dir') {
+        stdout('directory not found');
+        break;
+      }
+
+      stdout(
+        items.length
+          ? items.map((p) => `${basename(p)} (${state.fs[p].kind || state.fs[p].type})`).join('\n')
+          : '(empty)'
+      );
       break;
     }
-    case 'cat':
-      if (state.fs[target]?.content != null) stdout(state.fs[target].content);
+    case 'cat': {
+      const path = resolvePath(target);
+      if (state.fs[path]?.content != null) stdout(state.fs[path].content);
       else stdout('file not found');
       break;
+    }
     case 'write': {
-      const [path, ...text] = args;
-      if (!state.fs[path] || state.fs[path].type !== 'file') return stdout('file not found');
+      const [rawPath, ...text] = args;
+      const path = resolvePath(rawPath);
+
+      if (!state.fs[path] || state.fs[path].type !== 'file') {
+        stdout('file not found');
+        break;
+      }
+
       state.fs[path].content = text.join(' ');
       saveFS();
       stdout('saved');
       break;
     }
     case 'mkdir': {
-      const path = target;
-      const parts = path?.split('/').filter(Boolean) || [];
+      const path = resolvePath(target);
+      const parts = path.split('/').filter(Boolean);
       const name = parts.pop();
       const parent = '/' + parts.join('/');
-      if (!name || !state.fs[parent] || state.fs[parent].type !== 'dir') return stdout('invalid path');
+
+      if (!name || !state.fs[parent] || state.fs[parent].type !== 'dir') {
+        stdout('invalid path');
+        break;
+      }
+
       const full = `${parent === '/' ? '' : parent}/${name}`;
-      if (state.fs[full]) return stdout('exists');
+      if (state.fs[full]) {
+        stdout('exists');
+        break;
+      }
+
       state.fs[full] = { type: 'dir', children: [] };
       state.fs[parent].children.push(name);
       saveFS();
@@ -126,13 +174,22 @@ function terminalCommand(input, stdout) {
       break;
     }
     case 'touch': {
-      const path = target;
-      const parts = path?.split('/').filter(Boolean) || [];
+      const path = resolvePath(target);
+      const parts = path.split('/').filter(Boolean);
       const name = parts.pop();
       const parent = '/' + parts.join('/');
-      if (!name || !state.fs[parent] || state.fs[parent].type !== 'dir') return stdout('invalid path');
+
+      if (!name || !state.fs[parent] || state.fs[parent].type !== 'dir') {
+        stdout('invalid path');
+        break;
+      }
+
       const full = `${parent === '/' ? '' : parent}/${name}`;
-      if (state.fs[full]) return stdout('exists');
+      if (state.fs[full]) {
+        stdout('exists');
+        break;
+      }
+
       state.fs[full] = { type: 'file', kind: 'text', content: '' };
       state.fs[parent].children.push(name);
       saveFS();
@@ -140,14 +197,26 @@ function terminalCommand(input, stdout) {
       break;
     }
     case 'run': {
-      const file = state.fs[target];
-      if (!file || file.kind !== 'script') return stdout('script not found');
+      const path = resolvePath(target);
+      const file = state.fs[path];
+
+      if (!file || file.kind !== 'script') {
+        stdout('script not found');
+        break;
+      }
+
       runLocalScript(file.content, stdout);
       break;
     }
     case 'exec': {
-      const file = state.fs[target];
-      if (!file || file.kind !== 'exec') return stdout('executable not found');
+      const path = resolvePath(target);
+      const file = state.fs[path];
+
+      if (!file || file.kind !== 'exec') {
+        stdout('executable not found');
+        break;
+      }
+
       if (file.content === 'echo') stdout(args.slice(1).join(' '));
       break;
     }
@@ -155,8 +224,20 @@ function terminalCommand(input, stdout) {
       return '__CLEAR__';
     default:
       stdout(`Unknown command: ${cmd || ''}`);
-  }
-}
+    case 'cls':
+      return '__CLEAR__';
+    case 'cd': {
+      const path = resolvePath(target);
+
+      if (!state.fs[path] || state.fs[path].type !== 'dir') {
+        stdout('directory not found');
+        break;
+      }
+
+      state.cwd = path;
+      break;
+    }
+}}
 
 function appTerminal(body) {
   body.innerHTML = `
@@ -173,7 +254,7 @@ function appTerminal(body) {
     out.textContent += (out.textContent ? '\n' : '') + msg;
     out.scrollTop = out.scrollHeight;
   };
-  print('localos@machine:~$ help');
+  print(`localos@machine:${state.cwd}$ help`);
   terminalCommand('help', print);
 
   const execute = () => {
