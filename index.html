@@ -21,11 +21,26 @@
     </main>
   </div>
 
+  <div id="window-layer"></div>
+
+  <aside id="start-menu" class="hidden">
+    <input id="start-search" placeholder="Search apps" />
+    <div id="start-list"></div>
+  </aside>
+
+  <footer id="taskbar">
+    <button id="start-btn">Start</button>
+    <div id="task-items"></div>
+  </footer>
+
   <template id="window-template">
     <section class="window">
       <div class="window-header">
         <span class="window-title"></span>
-        <button class="close">✕</button>
+        <div class="window-controls">
+          <button class="minimize">—</button>
+          <button class="close">✕</button>
+        </div>
       </div>
       <div class="window-body"></div>
     </section>
