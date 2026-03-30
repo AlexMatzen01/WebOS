@@ -169,11 +169,20 @@ button {
 .file-list li {
   display: flex;
   justify-content: space-between;
+  gap: 0.4rem;
   padding: 0.35rem 0.45rem;
   border-bottom: 1px solid rgba(148, 163, 184, 0.25);
   cursor: pointer;
 }
 .file-list li:hover { background: rgba(148, 163, 184, 0.1); }
+.file-list.compact li {
+  flex-direction: column;
+  align-items: flex-start;
+}
+.active-tab {
+  background: rgba(34, 211, 238, 0.14);
+  border-left: 2px solid var(--accent);
+}
 
 .file-toolbar input[readonly] {
   min-width: 220px;
@@ -244,3 +253,29 @@ button {
 }
 
 .hidden { display: none; }
+
+.browser-shell {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.browser-toolbar {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.browser-layout {
+  display: grid;
+  gap: 0.7rem;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+}
+
+.browser-main textarea {
+  min-height: 170px;
+}
+
+@media (max-width: 900px) {
+  .browser-layout {
+    grid-template-columns: 1fr;
+  }
+}
