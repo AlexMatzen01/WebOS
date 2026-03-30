@@ -1,5 +1,6 @@
 const STORAGE_KEY = 'localos.fs.v1';
 const SETTINGS_KEY = 'localos.settings.v2';
+const BROWSER_KEY = 'localos.browser.v1';
 
 const defaultFS = {
   '/': { type: 'dir', children: ['home', 'apps', 'bin', 'docs'] },
@@ -32,10 +33,23 @@ const defaultFS = {
 };
 
 const defaultSettings = { theme: 'dark', homepage: 'https://example.com' };
+const defaultBrowserData = {
+  bookmarks: [
+    { name: 'Example', url: 'https://example.com' },
+    { name: 'MDN', url: 'https://developer.mozilla.org' },
+  ],
+  scriptSnippets: [
+    {
+      name: 'Highlight links',
+      code: "document.querySelectorAll('a').forEach((a) => (a.style.outline = '2px solid #22d3ee'));",
+    },
+  ],
+};
 
 const state = {
   fs: loadFS(),
   settings: loadSettings(),
+  browserData: loadBrowserData(),
   cwd: '/home',
   windows: new Map(),
   zCounter: 30,
@@ -58,6 +72,15 @@ function saveFS() {
 
 function saveSettings() {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings));
+}
+
+function loadBrowserData() {
+  const raw = localStorage.getItem(BROWSER_KEY);
+  return raw ? JSON.parse(raw) : structuredClone(defaultBrowserData);
+}
+
+function saveBrowserData() {
+  localStorage.setItem(BROWSER_KEY, JSON.stringify(state.browserData));
 }
 
 function normalizePath(path) {
@@ -639,17 +662,287 @@ function appSettings(body) {
 
 function appBrowser(body) {
   body.innerHTML = `
-    <div class="panel small">Lightweight browser (iframe). Some websites block embedding.</div>
-    <div class="row"><input id="url" /><button id="go">Go</button></div>
-    <iframe id="frame" title="browser" style="width:100%;height:360px;border:1px solid #334155;border-radius:0.5rem;margin-top:0.5rem;"></iframe>`;
-  const url = body.querySelector('#url');
-  const frame = body.querySelector('#frame');
-  url.value = state.settings.homepage;
-  frame.src = state.settings.homepage;
-  body.querySelector('#go').addEventListener('click', () => {
-    const value = url.value.startsWith('http') ? url.value : `https://${url.value}`;
-    frame.src = value;
+    <div class="panel small">
+      Advanced browser controller (no iframes): each tab opens in a real browser window so sites that block framing can still load normally.
+    </div>
+    <div class="browser-shell">
+      <div class="browser-toolbar">
+        <div class="row">
+          <button id="new-tab">New Tab</button>
+          <button id="close-tab">Close Tab</button>
+          <button id="focus-tab">Focus Tab</button>
+          <button id="refresh-tab">Refresh</button>
+        </div>
+        <div class="row">
+          <input id="url-input" placeholder="Enter URL or hostname" />
+          <button id="go-btn">Go</button>
+          <button id="back-btn">Back</button>
+          <button id="forward-btn">Forward</button>
+        </div>
+        <div class="row">
+          <button id="bookmark-btn">Bookmark</button>
+          <select id="bookmark-list"></select>
+          <button id="open-bookmark">Open Bookmark</button>
+        </div>
+      </div>
+      <div class="browser-layout">
+        <div class="browser-sidebar panel">
+          <strong>Tabs</strong>
+          <ul id="tab-list" class="file-list compact"></ul>
+          <strong>Recent History</strong>
+          <ul id="history-list" class="file-list compact"></ul>
+        </div>
+        <div class="browser-main">
+          <div class="panel">
+            <div class="row">
+              <input id="snippet-name" placeholder="Snippet name" />
+              <button id="save-snippet">Save Snippet</button>
+              <select id="snippet-list"></select>
+              <button id="load-snippet">Load</button>
+            </div>
+            <label>JavaScript Injection
+              <textarea id="inject-code" placeholder="console.log('hello from LocalOS browser controller')"></textarea>
+            </label>
+            <div class="row">
+              <button id="inject-direct">Inject (same-origin)</button>
+              <button id="inject-bookmarklet">Inject via bookmarklet</button>
+            </div>
+            <div class="small">
+              Direct injection works when tab access is same-origin. Bookmarklet injection attempts to run in any focused tab (subject to browser security/CSP).
+            </div>
+          </div>
+          <pre class="terminal-output" id="browser-log"></pre>
+        </div>
+      </div>
+    </div>`;
+
+  const tabs = [];
+  const history = [];
+  let activeTabId = null;
+  let tabCounter = 0;
+
+  const urlInput = body.querySelector('#url-input');
+  const tabList = body.querySelector('#tab-list');
+  const historyList = body.querySelector('#history-list');
+  const snippetList = body.querySelector('#snippet-list');
+  const injectCode = body.querySelector('#inject-code');
+  const bookmarkList = body.querySelector('#bookmark-list');
+  const browserLog = body.querySelector('#browser-log');
+  const snippetName = body.querySelector('#snippet-name');
+
+  const log = (line) => {
+    browserLog.textContent += `${line}\n`;
+    browserLog.scrollTop = browserLog.scrollHeight;
+  };
+
+  const toUrl = (value) => {
+    if (!value) return state.settings.homepage;
+    if (value.startsWith('http://') || value.startsWith('https://')) return value;
+    return `https://${value}`;
+  };
+
+  const renderBookmarkList = () => {
+    bookmarkList.innerHTML = '';
+    for (const bookmark of state.browserData.bookmarks) {
+      const option = document.createElement('option');
+      option.value = bookmark.url;
+      option.textContent = `${bookmark.name} — ${bookmark.url}`;
+      bookmarkList.appendChild(option);
+    }
+  };
+
+  const renderSnippets = () => {
+    snippetList.innerHTML = '';
+    for (const snippet of state.browserData.scriptSnippets) {
+      const option = document.createElement('option');
+      option.value = snippet.name;
+      option.textContent = snippet.name;
+      snippetList.appendChild(option);
+    }
+  };
+
+  const getActiveTab = () => tabs.find((tab) => tab.id === activeTabId);
+
+  const renderTabs = () => {
+    tabList.innerHTML = '';
+    for (const tab of tabs) {
+      const li = document.createElement('li');
+      li.className = tab.id === activeTabId ? 'active-tab' : '';
+      li.innerHTML = `<span>${tab.title}</span><span class="small">${tab.url}</span>`;
+      li.addEventListener('click', () => {
+        activeTabId = tab.id;
+        urlInput.value = tab.url;
+        renderTabs();
+      });
+      tabList.appendChild(li);
+    }
+  };
+
+  const renderHistory = () => {
+    historyList.innerHTML = '';
+    for (const entry of history.slice(-15).reverse()) {
+      const li = document.createElement('li');
+      li.innerHTML = `<span>${entry.title}</span><span class="small">${entry.url}</span>`;
+      li.addEventListener('click', () => {
+        openInTab(entry.url);
+      });
+      historyList.appendChild(li);
+    }
+  };
+
+  const markVisited = (tab, url) => {
+    tab.url = url;
+    history.push({ title: tab.title, url, visitedAt: Date.now() });
+    if (history.length > 250) history.shift();
+    renderTabs();
+    renderHistory();
+  };
+
+  const openTabWindow = (url) => {
+    const win = window.open(url, '_blank', 'noopener');
+    if (!win) {
+      log('Popup blocked. Allow popups for LocalOS to use advanced browser tabs.');
+      return null;
+    }
+    return win;
+  };
+
+  const createTab = (targetUrl = state.settings.homepage) => {
+    const url = toUrl(targetUrl);
+    const external = openTabWindow(url);
+    if (!external) return;
+
+    const tab = {
+      id: `tab-${++tabCounter}`,
+      title: `Tab ${tabCounter}`,
+      window: external,
+      url,
+      backStack: [],
+      forwardStack: [],
+    };
+    tabs.push(tab);
+    activeTabId = tab.id;
+    markVisited(tab, url);
+    urlInput.value = url;
+    renderTabs();
+    log(`Opened ${url} in ${tab.title}`);
+  };
+
+  const openInTab = (targetUrl) => {
+    const url = toUrl(targetUrl || urlInput.value.trim());
+    const tab = getActiveTab();
+    if (!tab) return createTab(url);
+
+    if (tab.url && tab.url !== url) tab.backStack.push(tab.url);
+    tab.forwardStack = [];
+    if (tab.window?.closed) tab.window = openTabWindow(url);
+    else tab.window.location.href = url;
+    markVisited(tab, url);
+    urlInput.value = url;
+    log(`Navigated ${tab.title} to ${url}`);
+  };
+
+  const tryDirectInjection = () => {
+    const tab = getActiveTab();
+    if (!tab) return log('No active tab');
+    const script = injectCode.value.trim();
+    if (!script) return log('No script to inject');
+
+    try {
+      const result = tab.window.eval(script);
+      log(`Direct injection succeeded: ${String(result)}`);
+    } catch (error) {
+      log(`Direct injection failed: ${error.message}`);
+    }
+  };
+
+  const injectViaBookmarklet = () => {
+    const tab = getActiveTab();
+    if (!tab) return log('No active tab');
+    const script = injectCode.value.trim();
+    if (!script) return log('No script to inject');
+
+    try {
+      const payload = encodeURIComponent(script);
+      tab.window.location.href = `javascript:(()=>{${decodeURIComponent(payload)}})();void 0;`;
+      log('Bookmarklet injection command sent.');
+    } catch (error) {
+      log(`Bookmarklet injection failed: ${error.message}`);
+    }
+  };
+
+  body.querySelector('#new-tab').addEventListener('click', () => createTab(urlInput.value.trim() || state.settings.homepage));
+  body.querySelector('#close-tab').addEventListener('click', () => {
+    const tab = getActiveTab();
+    if (!tab) return;
+    if (tab.window && !tab.window.closed) tab.window.close();
+    const idx = tabs.findIndex((x) => x.id === tab.id);
+    tabs.splice(idx, 1);
+    activeTabId = tabs[0]?.id ?? null;
+    renderTabs();
+    log(`Closed ${tab.title}`);
   });
+  body.querySelector('#focus-tab').addEventListener('click', () => {
+    const tab = getActiveTab();
+    if (!tab) return;
+    tab.window?.focus();
+    log(`Focused ${tab.title}`);
+  });
+  body.querySelector('#refresh-tab').addEventListener('click', () => {
+    const tab = getActiveTab();
+    if (!tab) return;
+    tab.window?.location?.reload();
+    log(`Refreshed ${tab.title}`);
+  });
+  body.querySelector('#go-btn').addEventListener('click', () => openInTab(urlInput.value.trim()));
+  urlInput.addEventListener('keydown', (e) => e.key === 'Enter' && openInTab(urlInput.value.trim()));
+  body.querySelector('#back-btn').addEventListener('click', () => {
+    const tab = getActiveTab();
+    if (!tab || !tab.backStack.length) return;
+    const previous = tab.backStack.pop();
+    tab.forwardStack.push(tab.url);
+    openInTab(previous);
+  });
+  body.querySelector('#forward-btn').addEventListener('click', () => {
+    const tab = getActiveTab();
+    if (!tab || !tab.forwardStack.length) return;
+    const next = tab.forwardStack.pop();
+    tab.backStack.push(tab.url);
+    openInTab(next);
+  });
+  body.querySelector('#bookmark-btn').addEventListener('click', () => {
+    const tab = getActiveTab();
+    if (!tab) return;
+    const name = prompt('Bookmark name?', tab.title) || tab.title;
+    state.browserData.bookmarks.push({ name, url: tab.url });
+    saveBrowserData();
+    renderBookmarkList();
+    log(`Bookmarked ${tab.url}`);
+  });
+  body.querySelector('#open-bookmark').addEventListener('click', () => openInTab(bookmarkList.value));
+  body.querySelector('#save-snippet').addEventListener('click', () => {
+    const code = injectCode.value.trim();
+    if (!code) return log('No snippet code to save');
+    const name = snippetName.value.trim() || `Snippet ${state.browserData.scriptSnippets.length + 1}`;
+    state.browserData.scriptSnippets.push({ name, code });
+    saveBrowserData();
+    renderSnippets();
+    snippetName.value = '';
+    log(`Saved snippet "${name}"`);
+  });
+  body.querySelector('#load-snippet').addEventListener('click', () => {
+    const snippet = state.browserData.scriptSnippets.find((x) => x.name === snippetList.value);
+    if (!snippet) return;
+    injectCode.value = snippet.code;
+    log(`Loaded snippet "${snippet.name}"`);
+  });
+  body.querySelector('#inject-direct').addEventListener('click', tryDirectInjection);
+  body.querySelector('#inject-bookmarklet').addEventListener('click', injectViaBookmarklet);
+
+  renderBookmarkList();
+  renderSnippets();
+  injectCode.value = state.browserData.scriptSnippets[0]?.code ?? '';
+  createTab(state.settings.homepage);
 }
 
 function appEditor(body) {
