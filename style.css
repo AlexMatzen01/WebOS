@@ -4,6 +4,7 @@
   --surface-soft: #374151;
   --text: #f9fafb;
   --accent: #22d3ee;
+  --terminal-font-size: 14px;
 }
 
 body[data-theme='midnight'] {
@@ -29,6 +30,27 @@ body {
   background: radial-gradient(circle at top, color-mix(in oklab, var(--accent) 20%, transparent), var(--bg) 50%);
   color: var(--text);
   min-height: 100vh;
+}
+
+body[data-wallpaper='Neon Grid'] {
+  background:
+    linear-gradient(rgba(15, 23, 42, 0.65), rgba(15, 23, 42, 0.95)),
+    repeating-linear-gradient(90deg, rgba(34, 211, 238, 0.12) 0 2px, transparent 2px 48px),
+    repeating-linear-gradient(0deg, rgba(34, 211, 238, 0.08) 0 2px, transparent 2px 48px),
+    var(--bg);
+}
+
+body[data-wallpaper='Graphite'] {
+  background: linear-gradient(120deg, #111827, #030712 60%, #0f172a);
+}
+
+body[data-wallpaper='Sunset Lake'] {
+  background: radial-gradient(circle at 70% 10%, rgba(251, 191, 36, 0.35), transparent 40%), #2e1065;
+}
+
+body[data-animations='off'] * {
+  transition: none !important;
+  animation: none !important;
 }
 
 #desktop {
@@ -85,6 +107,7 @@ body {
   background: rgba(15, 23, 42, 0.95);
   box-shadow: 0 30px 60px rgba(2, 6, 23, 0.65);
   z-index: 10;
+  transition: transform 120ms ease, box-shadow 120ms ease;
 }
 
 .window.is-minimized { display: none; }
@@ -132,6 +155,7 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   min-height: 250px;
   white-space: pre-wrap;
+  font-size: var(--terminal-font-size);
 }
 
 .row {
