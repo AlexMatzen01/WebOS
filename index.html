@@ -7,53 +7,44 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
+  <div id="lock-screen"></div>
   <div id="desktop">
     <header id="topbar">
       <strong>LocalOS</strong>
-      <span id="clock"></span>
+      <div class="row mini-actions">
+        <button id="desktop-switcher">Desktop</button>
+        <button id="open-settings">Settings</button>
+        <span id="clock"></span>
+      </div>
     </header>
     <main id="icon-grid">
       <button class="desktop-icon" data-app="terminal">Terminal</button>
-      <button class="desktop-icon" data-app="files">Files</button>
-      <button class="desktop-icon" data-app="settings">Settings</button>
-      <button class="desktop-icon" data-app="customize">Customizer</button>
+      <button class="desktop-icon" data-app="files">File Explorer</button>
       <button class="desktop-icon" data-app="browser">Browser</button>
-      <button class="desktop-icon" data-app="editor">Script Editor</button>
-      <button class="desktop-icon" data-app="studio">App Studio</button>
-      <button class="desktop-icon" data-app="runner">Web App Runner</button>
-      <button class="desktop-icon" data-app="tutorial">FS API Tutorial</button>
-      <button class="desktop-icon" data-app="notes">Notes</button>
-      <button class="desktop-icon" data-app="tasks">Task Board</button>
-      <button class="desktop-icon" data-app="calculator">Calculator</button>
+      <button class="desktop-icon" data-app="editor">Text Editor</button>
+      <button class="desktop-icon" data-app="taskmgr">Task Manager</button>
     </main>
   </div>
 
   <div id="window-layer"></div>
+  <aside id="notifications"></aside>
 
   <aside id="start-menu" class="hidden">
     <input id="start-search" placeholder="Search apps" />
     <div id="start-list"></div>
   </aside>
 
+  <section id="quick-settings" class="hidden panel quick-settings">
+    <h4>System Settings</h4>
+    <label>Theme <select id="theme"><option value="dark">Dark</option><option value="midnight">Midnight</option><option value="sunrise">Sunrise</option></select></label>
+    <label>Accent <input id="accent" type="color" value="#22d3ee"/></label>
+  </section>
+
   <footer id="taskbar">
     <button id="start-btn">Start</button>
     <div id="task-items"></div>
   </footer>
 
-  <template id="window-template">
-    <section class="window">
-      <div class="window-header">
-        <span class="window-title"></span>
-        <div class="window-controls">
-          <button class="minimize">—</button>
-          <button class="close">✕</button>
-        </div>
-      </div>
-      <div class="window-body"></div>
-    </section>
-  </template>
-
-  <script src="app.js"></script>
+  <script type="module" src="src/main.js"></script>
 </body>
 </html>
- 
