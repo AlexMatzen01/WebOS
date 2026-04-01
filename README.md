@@ -1,80 +1,83 @@
-# LocalOS (Web-Based OS)
+# LocalOS (Production-Style Browser OS)
 
-A backend-free web operating system prototype with multitasking features:
+LocalOS is a frontend-only operating system simulation that runs fully in the browser (HTML/CSS/JavaScript) with no backend.
 
-- GUI desktop with app launcher, start menu, and taskbar
-- Draggable/minimizable window manager with active-window tracking
-- LocalStorage-backed virtual file system
-- Debian-style terminal emulator with expanded shell commands
-- LOS (LocalOS Script) language + script editor
-- Web app platform: build apps with HTML/CSS/JS and run them in a sandbox
-- LocalOS.fs API bridge for app-controlled filesystem access
-- Executables and scripts in the virtual filesystem
-- Interactive Files app with directory navigation and inline editing
-- Terminal command history + quick file search command
-- Files app supports deleting the currently opened file
-- Theme system (Dark, Midnight, Sunrise)
-- Customizer app for window style and global custom CSS
-- Lightweight iframe browser and settings persistence
-- Tutorial app that teaches LocalOS filesystem API usage
+## What's new in this architecture
+
+- Modular core (`event bus`, `process manager`, `plugin system`)
+- IndexedDB-backed virtual filesystem with metadata + cache
+- Mount points (`/home`, `/system`, `/mnt`, `/dev`)
+- Virtual devices (`/dev/null`, `/dev/random`)
+- Symlink support and per-app permission checks
+- Terminal parser with piping (`|`), redirection (`>`, `>>`), and chaining (`&&`, `||`)
+- Environment variables (`$HOME`, `$PATH`, `$USER`) and PATH binary lookup
+- Package command: `lospkg install <pkg>`
+- LOS language runtime with `IF/ELSE`, `FOR`, `WHILE`, `FUNC/CALL`, `CMD` integration, and parse errors
+- Window manager upgrades: snapping, z-order focus, resize constraints, virtual desktops, animate-ready states
+- App runtime with explicit app manifests, permission prompts, background services
+- Built-in advanced apps: File Explorer, Terminal (tab-ready shell), Browser, Text Editor (LOS execution), Task Manager
+- System features: notifications, clipboard capture history, persistent settings, multi-user login/lock screen simulation
+
+## Refactored structure
+
+```text
+src/
+  main.js
+  core/
+    eventBus.js
+    processManager.js
+    pluginSystem.js
+  fs/
+    vfs.js
+  terminal/
+    parser.js
+    shell.js
+  los/
+    interpreter.js
+  wm/
+    windowManager.js
+  runtime/
+    appRuntime.js
+  apps/
+    builtinApps.js
+index.html
+style.css
+```
 
 ## Run
-
-Open `index.html` directly, or serve with a static server:
 
 ```bash
 python -m http.server 4173
 ```
 
-Then visit `http://localhost:4173`.
+Then open: <http://localhost:4173>
 
-## Terminal commands
+## Terminal quick examples
 
-- `help`
-- `pwd`
-- `date`
-- `whoami`
-- `ls [dir]`
-- `tree [dir]`
-- `find <query> [dir]`
-- `history`
-- `cd <dir>`
-- `cat <file>`
-- `write <file> <text>`
-- `mkdir <dir>`
-- `touch <file>`
-- `rm <path>`
-- `mv <src> <dst>`
-- `cp <src> <dst>`
-- `run <script.los>`
-- `openapp <path/to/app.webapp>`
-- `exec <binary.exe> [args...]`
-- `clear` / `cls`
+```bash
+ls /home/guest
+cat /dev/random
+echo hello | cat
+echo test > /home/guest/out.txt
+echo world >> /home/guest/out.txt
+export PATH=/system/bin:/home/guest/bin && echo ok
+lospkg install syntax-tools
+```
 
-## LOS language
+## LOS language sample
 
-- `PRINT "text"`
-- `SET name "value"`
-- `READ "/path/file.txt"`
-- `WRITE "/path/file.txt" "text"`
-- `LIST "/dir"`
-- `MKDIR "/dir"`
-- `DELETE "/path"`
+```los
+SET n "0"
+WHILE $n < 3
+  PRINT "Loop $n"
+  SET n "$n + 1"
+ENDWHILE
 
-## LocalOS.fs API for Web Apps
+FUNC greet
+  PRINT "Hello from function"
+ENDFUNC
 
-Inside a LocalOS web app, use:
+CALL greet
+CMD "ls /home/guest"
+```
 
-- `await LocalOS.fs.readFile(path)`
-- `await LocalOS.fs.writeFile(path, content)`
-- `await LocalOS.fs.listDir(path)`
-- `await LocalOS.fs.mkdir(path)`
-- `await LocalOS.fs.remove(path)`
-- `await LocalOS.fs.exists(path)`
-
-Use **App Studio** to create `.webapp` bundles and **Web App Runner** to execute them.
-
-## Productivity shortcuts
-
-- `Ctrl + Space` toggles the Start menu
-- `Esc` closes Start menu, or closes the top-most window when Start is hidden
