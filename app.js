@@ -98,6 +98,7 @@ const state = {
   windows: new Map(),
   zCounter: 30,
   winCounter: 0,
+  commandHistory: [],
 };
 
 function loadFS() {
@@ -186,6 +187,20 @@ function childrenOf(path) {
   return item.children.map((name) => `${path === '/' ? '' : path}/${name}`);
 }
 
+function addChildName(dirPath, name) {
+  const dir = state.fs[dirPath];
+  if (!dir || dir.type !== 'dir') return false;
+  if (!dir.children.includes(name)) dir.children.push(name);
+  return true;
+}
+
+function removeChildName(dirPath, name) {
+  const dir = state.fs[dirPath];
+  if (!dir || dir.type !== 'dir') return false;
+  dir.children = dir.children.filter((child) => child !== name);
+  return true;
+}
+
 function parseArgs(raw) {
   return raw.match(/"[^"]*"|[^\s]+/g)?.map((x) => x.replace(/^"|"$/g, '')) ?? [];
 }
@@ -199,9 +214,7 @@ function removePath(path) {
   }
 
   const parent = dirname(path);
-  if (state.fs[parent]?.type === 'dir') {
-    state.fs[parent].children = state.fs[parent].children.filter((name) => name !== basename(path));
-  }
+  removeChildName(parent, basename(path));
 
   delete state.fs[path];
   return true;
@@ -215,6 +228,7 @@ function movePath(srcPath, dstPath) {
   const dstBase = basename(dstPath);
 
   if (!ensureDir(dstParent)) return false;
+  if (dstPath === srcPath || dstPath.startsWith(`${srcPath}/`)) return false;
 
   const remap = {};
   for (const path of Object.keys(state.fs)) {
@@ -233,8 +247,8 @@ function movePath(srcPath, dstPath) {
   }
   for (const [newPath, node] of movedEntries) state.fs[newPath] = node;
 
-  state.fs[srcParent].children = state.fs[srcParent].children.filter((name) => name !== srcBase);
-  state.fs[dstParent].children.push(dstBase);
+  removeChildName(srcParent, srcBase);
+  addChildName(dstParent, dstBase);
 
   if (state.cwd === srcPath || state.cwd.startsWith(`${srcPath}/`)) {
     state.cwd = state.cwd.replace(srcPath, dstPath);
@@ -267,7 +281,7 @@ function runLocalScript(source, stdout) {
         stdout('WRITE failed');
         continue;
       }
-      if (!state.fs[path]) state.fs[parent].children.push(basename(path));
+      if (!state.fs[path]) addChildName(parent, basename(path));
       state.fs[path] = { type: 'file', kind: state.fs[path]?.kind || 'text', content: text };
       saveFS();
       stdout('WRITE ok');
@@ -281,7 +295,7 @@ function runLocalScript(source, stdout) {
       if (!ensureDir(parent) || state.fs[path]) stdout('MKDIR failed');
       else {
         state.fs[path] = { type: 'dir', children: [] };
-        state.fs[parent].children.push(basename(path));
+        addChildName(parent, basename(path));
         saveFS();
         stdout('MKDIR ok');
       }
@@ -372,7 +386,7 @@ function terminalCommand(input, stdout) {
 
   switch (cmd) {
     case 'help':
-      stdout('Commands: help, pwd, ls [dir], tree [dir], cd <dir>, cat <file>, write <file> <text>, mkdir <dir>, touch <file>, rm <path>, mv <src> <dst>, cp <src> <dst>, run <script>, openapp <webapp>, exec <binary>, date, whoami, clear');
+      stdout('Commands: help, pwd, ls [dir], tree [dir], find <query> [dir], history, cd <dir>, cat <file>, write <file> <text>, mkdir <dir>, touch <file>, rm <path>, mv <src> <dst>, cp <src> <dst>, run <script>, openapp <webapp>, exec <binary>, date, whoami, clear');
       break;
     case 'pwd':
       stdout(state.cwd);
@@ -407,6 +421,27 @@ function terminalCommand(input, stdout) {
         break;
       }
       stdout(renderTree(path).join('\n'));
+      break;
+    }
+    case 'find': {
+      const query = (args[0] || '').toLowerCase();
+      const root = resolvePath(args[1] || state.cwd);
+      if (!query) {
+        stdout('usage: find <query> [dir]');
+        break;
+      }
+      if (!state.fs[root]) {
+        stdout('path not found');
+        break;
+      }
+      const matches = Object.keys(state.fs)
+        .filter((p) => (p === root || p.startsWith(`${root}/`)) && basename(p).toLowerCase().includes(query))
+        .sort();
+      stdout(matches.length ? matches.join('\n') : '(no matches)');
+      break;
+    }
+    case 'history': {
+      stdout(state.commandHistory.length ? state.commandHistory.map((entry, i) => `${i + 1}. ${entry}`).join('\n') : '(empty)');
       break;
     }
     case 'cd': {
@@ -449,7 +484,7 @@ function terminalCommand(input, stdout) {
         break;
       }
       state.fs[path] = { type: 'dir', children: [] };
-      state.fs[parent].children.push(name);
+      addChildName(parent, name);
       saveFS();
       stdout('directory created');
       break;
@@ -467,7 +502,7 @@ function terminalCommand(input, stdout) {
         break;
       }
       state.fs[path] = { type: 'file', kind: 'text', content: '' };
-      state.fs[parent].children.push(name);
+      addChildName(parent, name);
       saveFS();
       stdout('file created');
       break;
@@ -518,7 +553,7 @@ function terminalCommand(input, stdout) {
       for (const [oldPath, newPath] of mappings) {
         state.fs[newPath] = structuredClone(state.fs[oldPath]);
       }
-      state.fs[parent].children.push(basename(dst));
+      addChildName(parent, basename(dst));
       saveFS();
       stdout('copied');
       break;
@@ -671,6 +706,7 @@ function appTerminal(body) {
 
   const out = body.querySelector('#term-out');
   const input = body.querySelector('#term-in');
+  let historyIndex = -1;
   const print = (msg) => {
     out.textContent += (out.textContent ? '\n' : '') + msg;
     out.scrollTop = out.scrollHeight;
@@ -679,6 +715,9 @@ function appTerminal(body) {
   const execute = () => {
     const cmd = input.value.trim();
     if (!cmd) return;
+    state.commandHistory.push(cmd);
+    if (state.commandHistory.length > 150) state.commandHistory.shift();
+    historyIndex = state.commandHistory.length;
     print(`localos@machine:${state.cwd}$ ${cmd}`);
     const result = terminalCommand(cmd, print);
     if (result === '__CLEAR__') out.textContent = '';
@@ -689,7 +728,21 @@ function appTerminal(body) {
   terminalCommand('help', print);
 
   body.querySelector('#term-run').addEventListener('click', execute);
-  input.addEventListener('keydown', (e) => e.key === 'Enter' && execute());
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') return execute();
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!state.commandHistory.length) return;
+      historyIndex = Math.max(0, historyIndex - 1);
+      input.value = state.commandHistory[historyIndex] || '';
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!state.commandHistory.length) return;
+      historyIndex = Math.min(state.commandHistory.length, historyIndex + 1);
+      input.value = state.commandHistory[historyIndex] || '';
+    }
+  });
 }
 
 function appFiles(body) {
@@ -705,7 +758,7 @@ function appFiles(body) {
     <label>Preview / Edit
       <textarea id="editor"></textarea>
     </label>
-    <div class="row"><button id="save-file">Save File</button><button id="refresh">Refresh</button></div>`;
+    <div class="row"><button id="save-file">Save File</button><button id="delete-file">Delete Selected</button><button id="refresh">Refresh</button></div>`;
 
   const list = body.querySelector('#file-list');
   const pathDisplay = body.querySelector('#path-display');
@@ -753,7 +806,7 @@ function appFiles(body) {
     const path = `${currentDir === '/' ? '' : currentDir}/${name}`;
     if (state.fs[path]) return alert('Already exists');
     state.fs[path] = { type: 'dir', children: [] };
-    state.fs[currentDir].children.push(name);
+    addChildName(currentDir, name);
     saveFS();
     renderList();
   });
@@ -764,7 +817,7 @@ function appFiles(body) {
     const path = `${currentDir === '/' ? '' : currentDir}/${name}`;
     if (state.fs[path]) return alert('Already exists');
     state.fs[path] = { type: 'file', kind: 'text', content: '' };
-    state.fs[currentDir].children.push(name);
+    addChildName(currentDir, name);
     saveFS();
     renderList();
   });
@@ -775,6 +828,16 @@ function appFiles(body) {
     if (!state.fs[openFilePath].kind) state.fs[openFilePath].kind = 'text';
     saveFS();
     alert('Saved');
+  });
+
+  body.querySelector('#delete-file').addEventListener('click', () => {
+    if (!openFilePath) return alert('Open a file first');
+    if (!confirm(`Delete ${openFilePath}?`)) return;
+    if (!removePath(openFilePath)) return alert('Delete failed');
+    saveFS();
+    editor.value = '';
+    openFilePath = null;
+    renderList();
   });
 
   body.querySelector('#refresh').addEventListener('click', renderList);
@@ -1213,7 +1276,7 @@ function appEditor(body) {
     const parent = dirname(path);
     if (!ensureDir(parent)) return alert('Invalid path');
 
-    if (!state.fs[path]) state.fs[parent].children.push(basename(path));
+    if (!state.fs[path]) addChildName(parent, basename(path));
     state.fs[path] = { type: 'file', kind: 'script', content: source.value };
     saveFS();
     alert('Script saved');
@@ -1440,7 +1503,7 @@ function appStudio(body) {
     const parent = dirname(path);
     if (!ensureDir(parent)) return alert('Invalid app path');
     const bundle = { name: basename(path), entry: 'index.html', files: { 'index.html': htmlInput.value, 'styles.css': cssInput.value, 'app.js': jsInput.value } };
-    if (!state.fs[path]) state.fs[parent].children.push(basename(path));
+    if (!state.fs[path]) addChildName(parent, basename(path));
     state.fs[path] = { type: 'file', kind: 'webapp', content: JSON.stringify(bundle, null, 2) };
     saveFS();
     return path;
@@ -1511,7 +1574,7 @@ window.addEventListener('message', (event) => {
     if (data.action === 'writeFile') {
       const parent = dirname(path);
       if (!ensureDir(parent)) return send(null, 'Invalid parent directory');
-      if (!state.fs[path]) state.fs[parent].children.push(basename(path));
+      if (!state.fs[path]) addChildName(parent, basename(path));
       state.fs[path] = { type: 'file', kind: state.fs[path]?.kind || 'text', content: String(data.payload?.content ?? '') };
       saveFS();
       return send(true);
@@ -1524,7 +1587,7 @@ window.addEventListener('message', (event) => {
       const parent = dirname(path);
       if (!ensureDir(parent) || state.fs[path]) return send(null, 'Cannot create directory');
       state.fs[path] = { type: 'dir', children: [] };
-      state.fs[parent].children.push(basename(path));
+      addChildName(parent, basename(path));
       saveFS();
       return send(true);
     }
@@ -1591,6 +1654,22 @@ function wireDesktop() {
   });
 
   startSearch.addEventListener('input', renderStartList);
+  document.addEventListener('keydown', (event) => {
+    if (event.ctrlKey && event.code === 'Space') {
+      event.preventDefault();
+      startMenu.classList.toggle('hidden');
+      if (!startMenu.classList.contains('hidden')) startSearch.focus();
+      return;
+    }
+    if (event.key === 'Escape' && !startMenu.classList.contains('hidden')) {
+      startMenu.classList.add('hidden');
+      return;
+    }
+    if (event.key === 'Escape' && state.windows.size) {
+      const ordered = [...state.windows.values()].sort((a, b) => Number(b.node.style.zIndex || 0) - Number(a.node.style.zIndex || 0));
+      ordered[0]?.node.querySelector('.close')?.click();
+    }
+  });
   document.addEventListener('click', (e) => {
     if (!startMenu.contains(e.target) && !startBtn.contains(e.target)) {
       startMenu.classList.add('hidden');

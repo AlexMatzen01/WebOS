@@ -11,6 +11,8 @@ A backend-free web operating system prototype with multitasking features:
 - LocalOS.fs API bridge for app-controlled filesystem access
 - Executables and scripts in the virtual filesystem
 - Interactive Files app with directory navigation and inline editing
+- Terminal command history + quick file search command
+- Files app supports deleting the currently opened file
 - Theme system (Dark, Midnight, Sunrise)
 - Customizer app for window style and global custom CSS
 - Lightweight iframe browser and settings persistence
@@ -34,6 +36,8 @@ Then visit `http://localhost:4173`.
 - `whoami`
 - `ls [dir]`
 - `tree [dir]`
+- `find <query> [dir]`
+- `history`
 - `cd <dir>`
 - `cat <file>`
 - `write <file> <text>`
@@ -69,3 +73,8 @@ Inside a LocalOS web app, use:
 - `await LocalOS.fs.exists(path)`
 
 Use **App Studio** to create `.webapp` bundles and **Web App Runner** to execute them.
+
+## Productivity shortcuts
+
+- `Ctrl + Space` toggles the Start menu
+- `Esc` closes Start menu, or closes the top-most window when Start is hidden
