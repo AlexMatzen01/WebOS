@@ -7,7 +7,7 @@ const TASKS_KEY = 'localos.tasks.v1';
 const defaultFS = {
   '/': { type: 'dir', children: ['home', 'apps', 'bin', 'docs'] },
   '/home': { type: 'dir', children: ['readme.txt', 'hello.los', 'notes.txt'] },
-  '/apps': { type: 'dir', children: ['about.app'] },
+  '/apps': { type: 'dir', children: ['about.app', 'sample.webapp', 'fs-tutorial.webapp'] },
   '/bin': { type: 'dir', children: ['echo.exe'] },
   '/docs': { type: 'dir', children: ['roadmap.txt'] },
   '/home/readme.txt': {
@@ -31,6 +31,32 @@ const defaultFS = {
     content: 'Roadmap:\n1. Better multitasking\n2. Better filesystem UX\n3. New commands',
   },
   '/apps/about.app': { type: 'file', kind: 'app', content: 'about' },
+  '/apps/sample.webapp': {
+    type: 'file',
+    kind: 'webapp',
+    content: JSON.stringify({
+      name: 'Sample Counter',
+      entry: 'index.html',
+      files: {
+        'index.html': '<main><h2>Sample Counter</h2><p id="count">0</p><button id="inc">Increment</button><button id="save">Save to /home/counter.txt</button><pre id="log"></pre></main>',
+        'styles.css': 'body{font-family:system-ui;background:#0f172a;color:#e2e8f0;padding:1rem}button{margin-right:.4rem}main{background:#1e293b;padding:1rem;border-radius:.6rem}',
+        'app.js': "const countEl=document.getElementById('count');const log=(m)=>document.getElementById('log').textContent+=m+'\\n';let count=0;document.getElementById('inc').onclick=()=>{count++;countEl.textContent=String(count)};document.getElementById('save').onclick=async()=>{await LocalOS.fs.writeFile('/home/counter.txt',String(count));log('Saved count to /home/counter.txt');};",
+      },
+    }, null, 2),
+  },
+  '/apps/fs-tutorial.webapp': {
+    type: 'file',
+    kind: 'webapp',
+    content: JSON.stringify({
+      name: 'LocalOS FS API Tutorial',
+      entry: 'index.html',
+      files: {
+        'index.html': '<main><h1>LocalOS File System API</h1><p>This tutorial app runs in the LocalOS web app sandbox.</p><ol><li><code>await LocalOS.fs.readFile(path)</code></li><li><code>await LocalOS.fs.writeFile(path, content)</code></li><li><code>await LocalOS.fs.listDir(path)</code></li><li><code>await LocalOS.fs.mkdir(path)</code></li><li><code>await LocalOS.fs.remove(path)</code></li></ol><button id="run">Run Demo</button><pre id="out"></pre></main>',
+        'styles.css': 'body{font-family:Inter,system-ui;background:#020617;color:#e2e8f0;padding:1rem}main{max-width:760px}code{background:#1e293b;padding:.1rem .3rem;border-radius:.3rem}button{margin-top:.5rem}',
+        'app.js': "const out=document.getElementById('out');const write=(t)=>out.textContent+=t+'\\n';document.getElementById('run').onclick=async()=>{write('Listing /home ...');write(JSON.stringify(await LocalOS.fs.listDir('/home'),null,2));write('Writing /home/tutorial-demo.txt ...');await LocalOS.fs.writeFile('/home/tutorial-demo.txt','Created by tutorial app');write(await LocalOS.fs.readFile('/home/tutorial-demo.txt'));};",
+      },
+    }, null, 2),
+  },
   '/bin/echo.exe': { type: 'file', kind: 'exec', content: 'echo' },
 };
 
@@ -46,6 +72,8 @@ const defaultSettings = {
   clock24h: false,
   showSeconds: true,
   startupApp: 'terminal',
+  windowOpacity: 95,
+  cornerRadius: 12,
 };
 const defaultBrowserData = {
   bookmarks: [
@@ -227,10 +255,100 @@ function runLocalScript(source, stdout) {
       stdout(text);
     } else if (cmd === 'SET') {
       vars[rest[0]] = rest.slice(1).join(' ');
+    } else if (cmd === 'READ') {
+      const path = resolvePath(rest[0]);
+      const node = state.fs[path];
+      stdout(node?.type === 'file' ? node.content : 'READ failed');
+    } else if (cmd === 'WRITE') {
+      const path = resolvePath(rest[0]);
+      const text = rest.slice(1).join(' ');
+      const parent = dirname(path);
+      if (!ensureDir(parent)) {
+        stdout('WRITE failed');
+        continue;
+      }
+      if (!state.fs[path]) state.fs[parent].children.push(basename(path));
+      state.fs[path] = { type: 'file', kind: state.fs[path]?.kind || 'text', content: text };
+      saveFS();
+      stdout('WRITE ok');
+    } else if (cmd === 'LIST') {
+      const path = resolvePath(rest[0]);
+      if (!ensureDir(path)) stdout('LIST failed');
+      else stdout(childrenOf(path).map((p) => basename(p)).join(', '));
+    } else if (cmd === 'MKDIR') {
+      const path = resolvePath(rest[0]);
+      const parent = dirname(path);
+      if (!ensureDir(parent) || state.fs[path]) stdout('MKDIR failed');
+      else {
+        state.fs[path] = { type: 'dir', children: [] };
+        state.fs[parent].children.push(basename(path));
+        saveFS();
+        stdout('MKDIR ok');
+      }
+    } else if (cmd === 'DELETE') {
+      const path = resolvePath(rest[0]);
+      if (!removePath(path)) stdout('DELETE failed');
+      else {
+        saveFS();
+        stdout('DELETE ok');
+      }
     } else {
       stdout(`Unknown LOS command: ${cmd}`);
     }
   }
+}
+
+function parseWebApp(path) {
+  const file = state.fs[path];
+  if (!file || file.kind !== 'webapp') return null;
+  try {
+    const parsed = JSON.parse(file.content);
+    if (!parsed.files || typeof parsed.files !== 'object') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function buildWebAppDocument(bundle, runtimeId) {
+  const html = bundle.files[bundle.entry || 'index.html'] || '<main>Missing entry file</main>';
+  const css = bundle.files['styles.css'] || '';
+  const js = bundle.files['app.js'] || '';
+  const bridge = `
+    <script>
+      (() => {
+        let seq = 0;
+        const pending = new Map();
+        function call(action, payload = {}) {
+          return new Promise((resolve, reject) => {
+            const id = 'req-' + (++seq);
+            pending.set(id, { resolve, reject });
+            parent.postMessage({ channel: 'localos-fs', runtimeId: '${runtimeId}', id, action, payload }, '*');
+          });
+        }
+        window.addEventListener('message', (event) => {
+          const data = event.data || {};
+          if (data.channel !== 'localos-fs-response' || data.runtimeId !== '${runtimeId}') return;
+          const wait = pending.get(data.id);
+          if (!wait) return;
+          pending.delete(data.id);
+          if (data.error) wait.reject(new Error(data.error));
+          else wait.resolve(data.result);
+        });
+        window.LocalOS = {
+          fs: {
+            readFile: (path) => call('readFile', { path }),
+            writeFile: (path, content) => call('writeFile', { path, content }),
+            listDir: (path) => call('listDir', { path }),
+            mkdir: (path) => call('mkdir', { path }),
+            remove: (path) => call('remove', { path }),
+            exists: (path) => call('exists', { path }),
+          }
+        };
+      })();
+    </script>
+  `;
+  return `<!doctype html><html><head><meta charset="utf-8"/><style>${css}</style></head><body>${html}${bridge}<script>${js}<\/script></body></html>`;
 }
 
 function renderTree(path, depth = 0) {
@@ -254,7 +372,7 @@ function terminalCommand(input, stdout) {
 
   switch (cmd) {
     case 'help':
-      stdout('Commands: help, pwd, ls [dir], tree [dir], cd <dir>, cat <file>, write <file> <text>, mkdir <dir>, touch <file>, rm <path>, mv <src> <dst>, cp <src> <dst>, run <script>, exec <binary>, date, whoami, clear');
+      stdout('Commands: help, pwd, ls [dir], tree [dir], cd <dir>, cat <file>, write <file> <text>, mkdir <dir>, touch <file>, rm <path>, mv <src> <dst>, cp <src> <dst>, run <script>, openapp <webapp>, exec <binary>, date, whoami, clear');
       break;
     case 'pwd':
       stdout(state.cwd);
@@ -413,6 +531,16 @@ function terminalCommand(input, stdout) {
         break;
       }
       runLocalScript(file.content, stdout);
+      break;
+    }
+    case 'openapp': {
+      const path = resolvePath(target);
+      if (!state.fs[path] || state.fs[path].kind !== 'webapp') {
+        stdout('webapp not found');
+        break;
+      }
+      createWindow(`Web App: ${basename(path)}`, (body) => appWebRunner(body, path));
+      stdout(`opened ${path}`);
       break;
     }
     case 'exec': {
@@ -659,7 +787,16 @@ function applyTheme(themeName) {
   document.body.dataset.animations = state.settings.animations ? 'on' : 'off';
   document.documentElement.style.setProperty('--accent', state.settings.accentColor || '#22d3ee');
   document.documentElement.style.setProperty('--terminal-font-size', `${state.settings.terminalFontSize || 14}px`);
+  document.documentElement.style.setProperty('--window-opacity', `${(state.settings.windowOpacity ?? 95) / 100}`);
+  document.documentElement.style.setProperty('--window-radius', `${state.settings.cornerRadius ?? 12}px`);
   document.documentElement.style.fontSize = `${Math.max(80, Math.min(130, Number(state.settings.uiScale) || 100))}%`;
+  let node = document.getElementById('localos-custom-style');
+  if (!node) {
+    node = document.createElement('style');
+    node.id = 'localos-custom-style';
+    document.head.appendChild(node);
+  }
+  node.textContent = state.settings.customCSS || '';
 }
 
 function appSettings(body) {
@@ -691,8 +828,12 @@ function appSettings(body) {
           <option value="terminal">Terminal</option>
           <option value="files">Files</option>
           <option value="settings">Settings</option>
+          <option value="customize">Customizer</option>
           <option value="browser">Browser</option>
           <option value="editor">Script Editor</option>
+          <option value="studio">App Studio</option>
+          <option value="runner">Web App Runner</option>
+          <option value="tutorial">FS API Tutorial</option>
           <option value="notes">Notes</option>
           <option value="tasks">Task Board</option>
           <option value="calculator">Calculator</option>
@@ -1054,7 +1195,7 @@ function appBrowser(body) {
 
 function appEditor(body) {
   body.innerHTML = `
-    <div class="panel small">LocalOS Script (LOS) keywords: PRINT "text", SET name "value".</div>
+    <div class="panel small">LocalOS Script (LOS) keywords: PRINT, SET, READ, WRITE, LIST, MKDIR, DELETE.</div>
     <label>Script path
       <input id="path" value="/home/newscript.los" />
     </label>
@@ -1228,12 +1369,187 @@ function appCalculator(body) {
   });
 }
 
+function appCustomizer(body) {
+  body.innerHTML = `
+    <div class="panel small">Advanced UI customization controls for LocalOS appearance.</div>
+    <label>Window opacity (%)
+      <input id="win-opacity" type="range" min="70" max="100" step="1" />
+    </label>
+    <label>Window corner radius (px)
+      <input id="corner-radius" type="range" min="6" max="24" step="1" />
+    </label>
+    <label>Custom CSS (applies globally)
+      <textarea id="custom-css" placeholder="Example: .desktop-icon { text-transform: uppercase; }"></textarea>
+    </label>
+    <div class="row"><button id="apply">Apply</button><button id="clear-css">Clear CSS</button></div>`;
+
+  const winOpacity = body.querySelector('#win-opacity');
+  const cornerRadius = body.querySelector('#corner-radius');
+  const customCss = body.querySelector('#custom-css');
+  winOpacity.value = state.settings.windowOpacity ?? 95;
+  cornerRadius.value = state.settings.cornerRadius ?? 12;
+  customCss.value = state.settings.customCSS || '';
+
+  const applyCustomCss = () => {
+    let node = document.getElementById('localos-custom-style');
+    if (!node) {
+      node = document.createElement('style');
+      node.id = 'localos-custom-style';
+      document.head.appendChild(node);
+    }
+    node.textContent = state.settings.customCSS || '';
+  };
+
+  body.querySelector('#apply').addEventListener('click', () => {
+    state.settings.windowOpacity = Number(winOpacity.value);
+    state.settings.cornerRadius = Number(cornerRadius.value);
+    state.settings.customCSS = customCss.value;
+    document.documentElement.style.setProperty('--window-opacity', `${state.settings.windowOpacity / 100}`);
+    document.documentElement.style.setProperty('--window-radius', `${state.settings.cornerRadius}px`);
+    applyCustomCss();
+    saveSettings();
+    alert('Customization applied');
+  });
+
+  body.querySelector('#clear-css').addEventListener('click', () => {
+    customCss.value = '';
+    state.settings.customCSS = '';
+    applyCustomCss();
+    saveSettings();
+  });
+}
+
+function appStudio(body) {
+  body.innerHTML = `
+    <div class="panel small">Create LocalOS web apps using HTML, CSS, and JavaScript. Save as .webapp files in /apps.</div>
+    <label>App path
+      <input id="studio-path" value="/apps/new-app.webapp" />
+    </label>
+    <label>HTML (index.html)<textarea id="studio-html"><main><h2>Hello LocalOS App</h2><button id="ping">Ping FS</button><pre id="log"></pre></main></textarea></label>
+    <label>CSS (styles.css)<textarea id="studio-css">body{font-family:system-ui;background:#111827;color:#f8fafc;padding:1rem}</textarea></label>
+    <label>JavaScript (app.js)<textarea id="studio-js">document.getElementById('ping').onclick=async()=>{const data=await LocalOS.fs.listDir('/home');document.getElementById('log').textContent=JSON.stringify(data,null,2);};</textarea></label>
+    <div class="row"><button id="studio-save">Save App</button><button id="studio-run">Run Preview</button></div>`;
+
+  const pathInput = body.querySelector('#studio-path');
+  const htmlInput = body.querySelector('#studio-html');
+  const cssInput = body.querySelector('#studio-css');
+  const jsInput = body.querySelector('#studio-js');
+
+  const saveBundle = () => {
+    const path = resolvePath(pathInput.value.trim());
+    const parent = dirname(path);
+    if (!ensureDir(parent)) return alert('Invalid app path');
+    const bundle = { name: basename(path), entry: 'index.html', files: { 'index.html': htmlInput.value, 'styles.css': cssInput.value, 'app.js': jsInput.value } };
+    if (!state.fs[path]) state.fs[parent].children.push(basename(path));
+    state.fs[path] = { type: 'file', kind: 'webapp', content: JSON.stringify(bundle, null, 2) };
+    saveFS();
+    return path;
+  };
+
+  body.querySelector('#studio-save').addEventListener('click', () => {
+    const path = saveBundle();
+    if (path) alert(`Saved ${path}`);
+  });
+  body.querySelector('#studio-run').addEventListener('click', () => {
+    const path = saveBundle();
+    if (!path) return;
+    createWindow(`Preview: ${basename(path)}`, (previewBody) => appWebRunner(previewBody, path));
+  });
+}
+
+function appFsTutorial(body) {
+  appWebRunner(body, '/apps/fs-tutorial.webapp');
+}
+
+function appWebRunner(body, initialPath = '/apps/sample.webapp') {
+  body.innerHTML = `
+    <div class="panel small">Run LocalOS web apps with the LocalOS.fs API bridge.</div>
+    <div class="row">
+      <input id="webapp-path" value="${initialPath}" />
+      <button id="webapp-load">Load</button>
+      <button id="webapp-refresh">Reload</button>
+    </div>
+    <iframe id="webapp-frame" title="LocalOS Web App Runtime" sandbox="allow-scripts" style="width:100%;height:58vh;border:1px solid #334155;border-radius:.5rem;"></iframe>
+    <pre class="terminal-output" id="webapp-log"></pre>`;
+
+  const pathInput = body.querySelector('#webapp-path');
+  const frame = body.querySelector('#webapp-frame');
+  const logEl = body.querySelector('#webapp-log');
+  const runtimeId = `runtime-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  frame.dataset.runtimeId = runtimeId;
+
+  const log = (msg) => {
+    logEl.textContent += `${msg}\n`;
+  };
+
+  const loadApp = () => {
+    const path = resolvePath(pathInput.value.trim());
+    const bundle = parseWebApp(path);
+    if (!bundle) return log(`Invalid web app bundle: ${path}`);
+    frame.srcdoc = buildWebAppDocument(bundle, runtimeId);
+    log(`Loaded ${path}`);
+  };
+
+  body.querySelector('#webapp-load').addEventListener('click', loadApp);
+  body.querySelector('#webapp-refresh').addEventListener('click', loadApp);
+  loadApp();
+}
+
+window.addEventListener('message', (event) => {
+  const data = event.data || {};
+  if (data.channel !== 'localos-fs') return;
+  const send = (result, error = null) => {
+    event.source?.postMessage({ channel: 'localos-fs-response', runtimeId: data.runtimeId, id: data.id, result, error }, '*');
+  };
+  try {
+    const path = resolvePath(data.payload?.path || '/');
+    if (data.action === 'readFile') {
+      const node = state.fs[path];
+      if (!node || node.type !== 'file') return send(null, 'File not found');
+      return send(node.content);
+    }
+    if (data.action === 'writeFile') {
+      const parent = dirname(path);
+      if (!ensureDir(parent)) return send(null, 'Invalid parent directory');
+      if (!state.fs[path]) state.fs[parent].children.push(basename(path));
+      state.fs[path] = { type: 'file', kind: state.fs[path]?.kind || 'text', content: String(data.payload?.content ?? '') };
+      saveFS();
+      return send(true);
+    }
+    if (data.action === 'listDir') {
+      if (!ensureDir(path)) return send(null, 'Directory not found');
+      return send(childrenOf(path).map((p) => ({ name: basename(p), type: state.fs[p].type, kind: state.fs[p].kind || state.fs[p].type, path: p })));
+    }
+    if (data.action === 'mkdir') {
+      const parent = dirname(path);
+      if (!ensureDir(parent) || state.fs[path]) return send(null, 'Cannot create directory');
+      state.fs[path] = { type: 'dir', children: [] };
+      state.fs[parent].children.push(basename(path));
+      saveFS();
+      return send(true);
+    }
+    if (data.action === 'remove') {
+      if (!removePath(path)) return send(null, 'Path not found');
+      saveFS();
+      return send(true);
+    }
+    if (data.action === 'exists') return send(Boolean(state.fs[path]));
+    return send(null, 'Unknown action');
+  } catch (error) {
+    return send(null, error.message);
+  }
+});
+
 const appRegistry = {
   terminal: ['Terminal', appTerminal],
   files: ['Files', appFiles],
   settings: ['Settings', appSettings],
+  customize: ['Customizer', appCustomizer],
   browser: ['Browser', appBrowser],
   editor: ['Script Editor', appEditor],
+  studio: ['App Studio', appStudio],
+  runner: ['Web App Runner', (body) => appWebRunner(body, '/apps/sample.webapp')],
+  tutorial: ['FS API Tutorial', appFsTutorial],
   notes: ['Notes', appNotes],
   tasks: ['Task Board', appTasks],
   calculator: ['Calculator', appCalculator],
