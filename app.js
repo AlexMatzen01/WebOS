@@ -1,6 +1,9 @@
 const STORAGE_KEY = 'localos.fs.v1';
-const SETTINGS_KEY = 'localos.settings.v2';
+const SETTINGS_KEY = 'localos.settings.v3';
 const BROWSER_KEY = 'localos.browser.v1';
+const NOTES_KEY = 'localos.notes.v1';
+const TASKS_KEY = 'localos.tasks.v1';
+const CUSTOM_APPS_KEY = 'localos.customapps.v1';
 
 const defaultFS = {
   '/': { type: 'dir', children: ['home', 'apps', 'bin', 'docs'] },
@@ -32,7 +35,19 @@ const defaultFS = {
   '/bin/echo.exe': { type: 'file', kind: 'exec', content: 'echo' },
 };
 
-const defaultSettings = { theme: 'dark', homepage: 'https://example.com' };
+const defaultSettings = {
+  theme: 'dark',
+  homepage: 'https://example.com',
+  accentColor: '#22d3ee',
+  wallpaper: 'Aurora',
+  animations: true,
+  autoSaveScripts: true,
+  uiScale: 100,
+  terminalFontSize: 14,
+  clock24h: false,
+  showSeconds: true,
+  startupApp: 'terminal',
+};
 const defaultBrowserData = {
   bookmarks: [
     { name: 'Example', url: 'https://example.com' },
@@ -50,6 +65,9 @@ const state = {
   fs: loadFS(),
   settings: loadSettings(),
   browserData: loadBrowserData(),
+  notes: loadNotes(),
+  tasks: loadTasks(),
+  customApps: loadCustomApps(),
   cwd: '/home',
   windows: new Map(),
   zCounter: 30,
@@ -63,7 +81,8 @@ function loadFS() {
 
 function loadSettings() {
   const raw = localStorage.getItem(SETTINGS_KEY);
-  return raw ? JSON.parse(raw) : structuredClone(defaultSettings);
+  const parsed = raw ? JSON.parse(raw) : {};
+  return { ...structuredClone(defaultSettings), ...parsed };
 }
 
 function saveFS() {
@@ -81,6 +100,33 @@ function loadBrowserData() {
 
 function saveBrowserData() {
   localStorage.setItem(BROWSER_KEY, JSON.stringify(state.browserData));
+}
+
+function loadNotes() {
+  const raw = localStorage.getItem(NOTES_KEY);
+  return raw ? JSON.parse(raw) : ['Welcome to Notes! Create quick ideas, plans, and drafts here.'];
+}
+
+function saveNotes() {
+  localStorage.setItem(NOTES_KEY, JSON.stringify(state.notes));
+}
+
+function loadTasks() {
+  const raw = localStorage.getItem(TASKS_KEY);
+  return raw ? JSON.parse(raw) : [];
+}
+
+function saveTasks() {
+  localStorage.setItem(TASKS_KEY, JSON.stringify(state.tasks));
+}
+
+function loadCustomApps() {
+  const raw = localStorage.getItem(CUSTOM_APPS_KEY);
+  return raw ? JSON.parse(raw) : [];
+}
+
+function saveCustomApps() {
+  localStorage.setItem(CUSTOM_APPS_KEY, JSON.stringify(state.customApps));
 }
 
 function normalizePath(path) {
@@ -620,6 +666,11 @@ function appFiles(body) {
 
 function applyTheme(themeName) {
   document.body.dataset.theme = themeName;
+  document.body.dataset.wallpaper = state.settings.wallpaper || 'Aurora';
+  document.body.dataset.animations = state.settings.animations ? 'on' : 'off';
+  document.documentElement.style.setProperty('--accent', state.settings.accentColor || '#22d3ee');
+  document.documentElement.style.setProperty('--terminal-font-size', `${state.settings.terminalFontSize || 14}px`);
+  document.documentElement.style.fontSize = `${Math.max(80, Math.min(130, Number(state.settings.uiScale) || 100))}%`;
 }
 
 function appSettings(body) {
@@ -635,19 +686,77 @@ function appSettings(body) {
       <label>Browser homepage
         <input id="homepage" />
       </label>
-      <div class="row"><button id="save">Save Settings</button><button id="reset">Reset Filesystem</button></div>
+      <label>Accent color
+        <input id="accent-color" type="color" />
+      </label>
+      <label>Wallpaper preset
+        <select id="wallpaper">
+          <option value="Aurora">Aurora</option>
+          <option value="Neon Grid">Neon Grid</option>
+          <option value="Graphite">Graphite</option>
+          <option value="Sunset Lake">Sunset Lake</option>
+        </select>
+      </label>
+      <label>Startup app
+        <select id="startup-app"></select>
+      </label>
+      <label>UI scale
+        <input id="ui-scale" type="range" min="80" max="130" step="5" />
+      </label>
+      <label>Terminal font size
+        <input id="terminal-font" type="range" min="12" max="22" step="1" />
+      </label>
+      <label><input type="checkbox" id="clock-24h" /> Use 24-hour clock</label>
+      <label><input type="checkbox" id="show-seconds" /> Show seconds in clock</label>
+      <label><input type="checkbox" id="animations" /> Enable animations</label>
+      <label><input type="checkbox" id="autosave-scripts" /> Auto-save scripts in editor</label>
+      <div class="row"><button id="save">Save Settings</button><button id="reset">Reset Filesystem</button><button id="defaults">Restore Defaults</button></div>
     </div>`;
 
   const theme = body.querySelector('#theme');
   const homepage = body.querySelector('#homepage');
+  const accentColor = body.querySelector('#accent-color');
+  const wallpaper = body.querySelector('#wallpaper');
+  const startupApp = body.querySelector('#startup-app');
+  const uiScale = body.querySelector('#ui-scale');
+  const terminalFont = body.querySelector('#terminal-font');
+  const clock24h = body.querySelector('#clock-24h');
+  const showSeconds = body.querySelector('#show-seconds');
+  const animations = body.querySelector('#animations');
+  const autosaveScripts = body.querySelector('#autosave-scripts');
+  for (const [key, [title]] of Object.entries(getAppRegistry())) {
+    const option = document.createElement('option');
+    option.value = key;
+    option.textContent = title;
+    startupApp.appendChild(option);
+  }
   theme.value = state.settings.theme;
   homepage.value = state.settings.homepage;
+  accentColor.value = state.settings.accentColor;
+  wallpaper.value = state.settings.wallpaper;
+  startupApp.value = state.settings.startupApp;
+  if (!startupApp.value) startupApp.value = 'terminal';
+  uiScale.value = state.settings.uiScale;
+  terminalFont.value = state.settings.terminalFontSize;
+  clock24h.checked = state.settings.clock24h;
+  showSeconds.checked = state.settings.showSeconds;
+  animations.checked = state.settings.animations;
+  autosaveScripts.checked = state.settings.autoSaveScripts;
 
   theme.addEventListener('change', () => applyTheme(theme.value));
 
   body.querySelector('#save').addEventListener('click', () => {
     state.settings.theme = theme.value;
     state.settings.homepage = homepage.value;
+    state.settings.accentColor = accentColor.value;
+    state.settings.wallpaper = wallpaper.value;
+    state.settings.startupApp = startupApp.value;
+    state.settings.uiScale = Number(uiScale.value);
+    state.settings.terminalFontSize = Number(terminalFont.value);
+    state.settings.clock24h = clock24h.checked;
+    state.settings.showSeconds = showSeconds.checked;
+    state.settings.animations = animations.checked;
+    state.settings.autoSaveScripts = autosaveScripts.checked;
     applyTheme(theme.value);
     saveSettings();
     alert('Saved');
@@ -657,6 +766,13 @@ function appSettings(body) {
     state.fs = structuredClone(defaultFS);
     saveFS();
     alert('Filesystem reset');
+  });
+
+  body.querySelector('#defaults').addEventListener('click', () => {
+    state.settings = structuredClone(defaultSettings);
+    applyTheme(state.settings.theme);
+    saveSettings();
+    alert('Defaults restored. Reopen settings to view reset values.');
   });
 }
 
@@ -973,22 +1089,302 @@ function appEditor(body) {
 
   body.querySelector('#run').addEventListener('click', () => {
     preview.textContent = '';
+    if (state.settings.autoSaveScripts) body.querySelector('#save').click();
     runLocalScript(source.value, print);
   });
 }
 
-const appRegistry = {
+function appNotes(body) {
+  body.innerHTML = `
+    <div class="panel small">Simple persistent note cards for quick ideas.</div>
+    <div class="row">
+      <button id="add-note">Add Note</button>
+      <button id="save-notes">Save All</button>
+    </div>
+    <div id="notes-wrap"></div>`;
+
+  const wrap = body.querySelector('#notes-wrap');
+
+  const render = () => {
+    wrap.innerHTML = '';
+    state.notes.forEach((value, index) => {
+      const row = document.createElement('div');
+      row.className = 'panel';
+      row.innerHTML = `
+        <label>Note ${index + 1}
+          <textarea data-note="${index}">${value}</textarea>
+        </label>
+        <div class="row"><button data-remove="${index}">Delete</button></div>`;
+      wrap.appendChild(row);
+    });
+  };
+
+  body.querySelector('#add-note').addEventListener('click', () => {
+    state.notes.push('');
+    render();
+  });
+
+  body.querySelector('#save-notes').addEventListener('click', () => {
+    body.querySelectorAll('textarea[data-note]').forEach((el) => {
+      state.notes[Number(el.dataset.note)] = el.value;
+    });
+    saveNotes();
+    alert('Notes saved');
+  });
+
+  wrap.addEventListener('click', (event) => {
+    if (!event.target.matches('button[data-remove]')) return;
+    const idx = Number(event.target.dataset.remove);
+    state.notes.splice(idx, 1);
+    saveNotes();
+    render();
+  });
+
+  render();
+}
+
+function appTasks(body) {
+  body.innerHTML = `
+    <div class="panel small">Task board with status tracking and due dates.</div>
+    <div class="row">
+      <input id="task-title" placeholder="New task title" />
+      <input id="task-due" type="date" />
+      <button id="add-task">Add Task</button>
+    </div>
+    <ul id="task-list" class="file-list"></ul>`;
+
+  const list = body.querySelector('#task-list');
+  const titleInput = body.querySelector('#task-title');
+  const dueInput = body.querySelector('#task-due');
+
+  const render = () => {
+    list.innerHTML = '';
+    for (const [index, task] of state.tasks.entries()) {
+      const item = document.createElement('li');
+      item.innerHTML = `
+        <span>${task.title} ${task.due ? `(due ${task.due})` : ''}</span>
+        <div>
+          <select data-status="${index}">
+            <option value="todo">Todo</option>
+            <option value="doing">Doing</option>
+            <option value="done">Done</option>
+          </select>
+          <button data-delete="${index}">✕</button>
+        </div>`;
+      item.querySelector('select').value = task.status;
+      list.appendChild(item);
+    }
+  };
+
+  body.querySelector('#add-task').addEventListener('click', () => {
+    const title = titleInput.value.trim();
+    if (!title) return;
+    state.tasks.push({ title, due: dueInput.value, status: 'todo' });
+    titleInput.value = '';
+    dueInput.value = '';
+    saveTasks();
+    render();
+  });
+
+  list.addEventListener('change', (event) => {
+    if (!event.target.matches('select[data-status]')) return;
+    const idx = Number(event.target.dataset.status);
+    state.tasks[idx].status = event.target.value;
+    saveTasks();
+  });
+
+  list.addEventListener('click', (event) => {
+    if (!event.target.matches('button[data-delete]')) return;
+    const idx = Number(event.target.dataset.delete);
+    state.tasks.splice(idx, 1);
+    saveTasks();
+    render();
+  });
+
+  render();
+}
+
+function appCalculator(body) {
+  body.innerHTML = `
+    <div class="panel small">Quick calculator with expression history.</div>
+    <label>Expression
+      <input id="calc-input" placeholder="(12 + 8) * 3 / 2" />
+    </label>
+    <div class="row"><button id="calc-run">Calculate</button><button id="calc-clear">Clear History</button></div>
+    <pre class="terminal-output" id="calc-history"></pre>`;
+
+  const input = body.querySelector('#calc-input');
+  const history = body.querySelector('#calc-history');
+
+  const append = (line) => {
+    history.textContent += `${line}\n`;
+  };
+
+  body.querySelector('#calc-run').addEventListener('click', () => {
+    const expr = input.value.trim();
+    if (!expr) return;
+    try {
+      const result = Function(`"use strict"; return (${expr})`)();
+      append(`${expr} = ${result}`);
+    } catch (error) {
+      append(`${expr} -> Error: ${error.message}`);
+    }
+    input.value = '';
+  });
+
+  body.querySelector('#calc-clear').addEventListener('click', () => {
+    history.textContent = '';
+  });
+}
+
+function normalizeAppId(value) {
+  return value.toLowerCase().replace(/[^a-z0-9-_]/g, '-').replace(/-{2,}/g, '-').replace(/^-|-$/g, '').slice(0, 36);
+}
+
+function renderCustomApp(body, app) {
+  body.innerHTML = `
+    <div class="panel small">${app.title} — Custom App</div>
+    <iframe class="custom-app-frame" sandbox="allow-scripts allow-forms allow-modals"></iframe>`;
+  const frame = body.querySelector('iframe');
+  frame.srcdoc = `<!doctype html>
+<html>
+<head>
+  <style>body{margin:0;padding:12px;font-family:system-ui,sans-serif;background:#fff;color:#111827;}${app.css || ''}</style>
+</head>
+<body>
+${app.html || '<h2>Untitled Custom App</h2>'}
+<script>
+try {
+${app.js || ''}
+} catch (error) {
+  document.body.insertAdjacentHTML('beforeend', '<pre style="color:#b91c1c">Error: ' + error.message + '</pre>');
+}
+</script>
+</body>
+</html>`;
+}
+
+function appStudio(body) {
+  body.innerHTML = `
+    <div class="panel small">Build apps with HTML, CSS, and JavaScript. Save and launch from Start menu.</div>
+    <label>App title<input id="studio-title" placeholder="Weather Board" /></label>
+    <label>App ID<input id="studio-id" placeholder="weather-board" /></label>
+    <label>HTML<textarea id="studio-html"><h2>Hello App</h2><p>Edit this app in App Studio.</p></textarea></label>
+    <label>CSS<textarea id="studio-css">h2 { color: #0ea5e9; }</textarea></label>
+    <label>JavaScript<textarea id="studio-js">console.log('Custom app loaded');</textarea></label>
+    <div class="row">
+      <button id="studio-preview">Preview</button>
+      <button id="studio-save">Save App</button>
+      <button id="studio-clear">Clear</button>
+    </div>
+    <ul id="studio-list" class="file-list"></ul>`;
+
+  const titleInput = body.querySelector('#studio-title');
+  const idInput = body.querySelector('#studio-id');
+  const htmlInput = body.querySelector('#studio-html');
+  const cssInput = body.querySelector('#studio-css');
+  const jsInput = body.querySelector('#studio-js');
+  const appList = body.querySelector('#studio-list');
+
+  const renderList = () => {
+    appList.innerHTML = '';
+    for (const app of state.customApps) {
+      const item = document.createElement('li');
+      item.innerHTML = `
+        <span>${app.title} <span class="small">(${app.id})</span></span>
+        <div class="row">
+          <button data-open="${app.id}">Open</button>
+          <button data-edit="${app.id}">Edit</button>
+          <button data-delete="${app.id}">Delete</button>
+        </div>`;
+      appList.appendChild(item);
+    }
+  };
+
+  body.querySelector('#studio-preview').addEventListener('click', () => {
+    const draft = {
+      id: normalizeAppId(idInput.value || titleInput.value || 'preview-app'),
+      title: titleInput.value.trim() || 'Preview App',
+      html: htmlInput.value,
+      css: cssInput.value,
+      js: jsInput.value,
+    };
+    createWindow(`${draft.title} (Preview)`, (previewBody) => renderCustomApp(previewBody, draft));
+  });
+
+  body.querySelector('#studio-save').addEventListener('click', () => {
+    const title = titleInput.value.trim();
+    const id = normalizeAppId(idInput.value || title);
+    if (!title || !id) return alert('Title and a valid App ID are required');
+
+    const payload = { id, title, html: htmlInput.value, css: cssInput.value, js: jsInput.value };
+    const existing = state.customApps.findIndex((x) => x.id === id);
+    if (existing >= 0) state.customApps[existing] = payload;
+    else state.customApps.push(payload);
+    saveCustomApps();
+    renderList();
+    alert('Custom app saved');
+  });
+
+  body.querySelector('#studio-clear').addEventListener('click', () => {
+    titleInput.value = '';
+    idInput.value = '';
+    htmlInput.value = '<h2>Hello App</h2><p>Edit this app in App Studio.</p>';
+    cssInput.value = 'h2 { color: #0ea5e9; }';
+    jsInput.value = "console.log('Custom app loaded');";
+  });
+
+  appList.addEventListener('click', (event) => {
+    const openId = event.target.dataset.open;
+    const editId = event.target.dataset.edit;
+    const deleteId = event.target.dataset.delete;
+    if (openId) {
+      const app = state.customApps.find((x) => x.id === openId);
+      if (app) createWindow(app.title, (appBody) => renderCustomApp(appBody, app));
+    }
+    if (editId) {
+      const app = state.customApps.find((x) => x.id === editId);
+      if (!app) return;
+      titleInput.value = app.title;
+      idInput.value = app.id;
+      htmlInput.value = app.html;
+      cssInput.value = app.css;
+      jsInput.value = app.js;
+    }
+    if (deleteId) {
+      state.customApps = state.customApps.filter((x) => x.id !== deleteId);
+      saveCustomApps();
+      renderList();
+    }
+  });
+
+  renderList();
+}
+
+const builtinApps = {
   terminal: ['Terminal', appTerminal],
   files: ['Files', appFiles],
   settings: ['Settings', appSettings],
   browser: ['Browser', appBrowser],
   editor: ['Script Editor', appEditor],
+  notes: ['Notes', appNotes],
+  tasks: ['Task Board', appTasks],
+  calculator: ['Calculator', appCalculator],
+  studio: ['App Studio', appStudio],
 };
+
+function getAppRegistry() {
+  const customEntries = {};
+  for (const app of state.customApps) {
+    customEntries[`custom:${app.id}`] = [app.title, (body) => renderCustomApp(body, app)];
+  }
+  return { ...builtinApps, ...customEntries };
+}
 
 function wireDesktop() {
   document.querySelectorAll('.desktop-icon').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const [title, renderer] = appRegistry[btn.dataset.app];
+      const [title, renderer] = getAppRegistry()[btn.dataset.app];
       createWindow(title, renderer);
     });
   });
@@ -1002,7 +1398,7 @@ function wireDesktop() {
     const q = startSearch.value.trim().toLowerCase();
     startList.innerHTML = '';
 
-    for (const [key, [title, renderer]] of Object.entries(appRegistry)) {
+    for (const [key, [title, renderer]] of Object.entries(getAppRegistry())) {
       if (q && !title.toLowerCase().includes(q)) continue;
       const item = document.createElement('button');
       item.className = 'start-item';
@@ -1031,8 +1427,19 @@ function wireDesktop() {
 }
 
 setInterval(() => {
-  document.getElementById('clock').textContent = new Date().toLocaleTimeString();
+  const now = new Date();
+  document.getElementById('clock').textContent = now.toLocaleTimeString([], {
+    hour12: !state.settings.clock24h,
+    second: state.settings.showSeconds ? '2-digit' : undefined,
+    minute: '2-digit',
+    hour: '2-digit',
+  });
 }, 1000);
 
 applyTheme(state.settings.theme);
 wireDesktop();
+
+if (getAppRegistry()[state.settings.startupApp]) {
+  const [title, renderer] = getAppRegistry()[state.settings.startupApp];
+  createWindow(title, renderer);
+}
