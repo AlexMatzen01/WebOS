@@ -194,6 +194,15 @@ export function registerBuiltinApps({ appRuntime, shell, processManager }) {
       <button id='loadProject'>Load</button>
       <button id='saveProject'>Save</button>
       <button id='runPreview'>Run Preview</button>
+      <button id='installApp'>Install to LocalOS</button>
+    </div>
+    <div class='row' style='margin-top:.5rem'>
+      <input id='appId' placeholder='app id (my-first-app)' />
+      <input id='appName' placeholder='App name' />
+      <input id='appIcon' value='🧩' placeholder='Icon' style='max-width:120px' />
+      <input id='appWidth' type='number' value='900' min='380' placeholder='Width' style='max-width:110px' />
+      <input id='appHeight' type='number' value='620' min='260' placeholder='Height' style='max-width:110px' />
+      <label><input id='addDesktopShortcut' type='checkbox' /> Add to desktop</label>
     </div>
     <div class='row' style='margin-top:.5rem'>
       <input id='assetName' placeholder='Asset key (logo, ding, etc)' />
@@ -223,7 +232,10 @@ export function registerBuiltinApps({ appRuntime, shell, processManager }) {
   `;
 
   const defaults = () => ({
+    id: 'my-first-app',
     name: 'My LocalOS App',
+    icon: '🧩',
+    window: { width: 900, height: 620 },
     html: '<main><h1>Hello from App Studio</h1><p id="status">Ready.</p><button id="save">Write to LocalOS</button><img id="logo" style="max-width:160px;display:none" /></main>',
     css: 'body{font-family:Inter,system-ui;background:#020617;color:#e2e8f0;padding:1rem}main{background:#0f172a;border:1px solid #334155;border-radius:.75rem;padding:1rem}button{margin-top:.6rem}',
     js: `
@@ -261,6 +273,11 @@ export function registerBuiltinApps({ appRuntime, shell, processManager }) {
   const logEl = root.querySelector('#studioLog');
 
   const renderEditors = () => {
+    root.querySelector('#appId').value = project.id || '';
+    root.querySelector('#appName').value = project.name || '';
+    root.querySelector('#appIcon').value = project.icon || '🧩';
+    root.querySelector('#appWidth').value = project.window?.width || 900;
+    root.querySelector('#appHeight').value = project.window?.height || 620;
     htmlEditor.value = project.html;
     cssEditor.value = project.css;
     jsEditor.value = project.js;
@@ -268,6 +285,13 @@ export function registerBuiltinApps({ appRuntime, shell, processManager }) {
   };
 
   const syncProject = () => {
+    project.id = root.querySelector('#appId').value.trim() || 'my-first-app';
+    project.name = root.querySelector('#appName').value.trim() || 'My LocalOS App';
+    project.icon = root.querySelector('#appIcon').value.trim() || '🧩';
+    project.window = {
+      width: Math.max(380, Number(root.querySelector('#appWidth').value) || 900),
+      height: Math.max(260, Number(root.querySelector('#appHeight').value) || 620),
+    };
     project.html = htmlEditor.value;
     project.css = cssEditor.value;
     project.js = jsEditor.value;
@@ -386,6 +410,32 @@ ${project.js}
   };
 
   root.querySelector('#runPreview').onclick = runPreview;
+  root.querySelector('#installApp').onclick = () => {
+    syncProject();
+    const appDef = {
+      id: project.id,
+      name: project.name,
+      icon: project.icon,
+      window: project.window,
+      html: project.html,
+      css: project.css,
+      js: project.js,
+      assets: project.assets,
+      permissions: ['fs.read', 'fs.write'],
+      source: 'appstudio',
+    };
+    const installed = JSON.parse(localStorage.getItem(window.LocalOS.STUDIO_APPS_KEY) || '[]').filter((app) => app.id !== appDef.id);
+    installed.push(appDef);
+    localStorage.setItem(window.LocalOS.STUDIO_APPS_KEY, JSON.stringify(installed));
+    window.LocalOS.registerStudioApp(ctx.appRuntime, appDef);
+
+    if (root.querySelector('#addDesktopShortcut').checked) {
+      const shortcuts = new Set(JSON.parse(localStorage.getItem(window.LocalOS.DESKTOP_SHORTCUTS_KEY) || '[]'));
+      shortcuts.add(appDef.id);
+      localStorage.setItem(window.LocalOS.DESKTOP_SHORTCUTS_KEY, JSON.stringify([...shortcuts]));
+    }
+    appendLog(`Installed app ${appDef.name} (${appDef.id})`);
+  };
   root.querySelector('#insertExample').onclick = () => {
     jsEditor.value += `\n// Example: list user documents\nconst docs = await LocalOS.fs.list('/home/guest/Documents');\nLocalOS.notify('Found ' + docs.length + ' entries in Documents');\n`;
     syncProject();

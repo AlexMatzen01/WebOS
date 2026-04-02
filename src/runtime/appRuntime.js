@@ -10,6 +10,7 @@ export class AppRuntime {
 
   register(manifest, factory) {
     this.apps.set(manifest.id, { manifest, factory });
+    this.bus.emit('app:registered', manifest);
   }
 
   list() {
@@ -44,6 +45,8 @@ export class AppRuntime {
     const ctx = {
       appId,
       manifest,
+      appRuntime: this,
+      wm: this.wm,
       bus: this.bus,
       fs: scopedFs,
       background: (fn) => {
