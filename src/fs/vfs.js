@@ -142,6 +142,66 @@ export class VFS {
     await this.put(parent);
   }
 
+  async remove(path, appId = '*') {
+    path = norm(path);
+    if (path === '/') throw new Error('Cannot remove root');
+    const node = await this.get(path, { followLinks: false });
+    if (!node) throw new Error('Path not found');
+    this.ensureWritable(path);
+    if (node.type === 'dir') {
+      for (const child of [...(node.children || [])]) {
+        await this.remove(child, appId);
+      }
+    }
+    await new Promise((res, rej) => {
+      const req = this.tx('readwrite').delete(path);
+      req.onsuccess = () => res();
+      req.onerror = () => rej(req.error);
+    });
+    this.cache.delete(path);
+    const parentPath = path.split('/').slice(0, -1).join('/') || '/';
+    const parent = await this.get(parentPath, { followLinks: false });
+    if (parent?.type === 'dir') {
+      if (!this.canAccess(parent, appId, 'w')) throw new Error('Permission denied');
+      parent.children = (parent.children || []).filter((p) => p !== path);
+      parent.updatedAt = now();
+      await this.put(parent);
+    }
+  }
+
+  async move(src, dest, appId = '*') {
+    src = norm(src);
+    dest = norm(dest);
+    const node = await this.get(src, { followLinks: false });
+    if (!node) throw new Error('Source not found');
+    const clone = JSON.parse(JSON.stringify(node));
+    await this.copy(src, dest, appId, clone);
+    await this.remove(src, appId);
+  }
+
+  async copy(src, dest, appId = '*', prefetched = null) {
+    src = norm(src);
+    dest = norm(dest);
+    const node = prefetched || await this.get(src, { followLinks: false });
+    if (!node) throw new Error('Source not found');
+    this.ensureWritable(dest);
+
+    if (node.type === 'file') {
+      await this.writeFile(dest, node.content, appId);
+      return;
+    }
+    if (node.type === 'symlink') {
+      await this.symlink(node.target, dest, appId);
+      return;
+    }
+
+    await this.mkdir(dest, appId);
+    for (const child of node.children || []) {
+      const name = child.split('/').pop();
+      await this.copy(child, `${dest}/${name}`, appId);
+    }
+  }
+
   async symlink(target, path, appId = '*') {
     path = norm(path);
     const parent = await this.get(path.split('/').slice(0, -1).join('/') || '/');
