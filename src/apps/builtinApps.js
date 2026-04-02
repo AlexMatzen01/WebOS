@@ -27,23 +27,116 @@ export function registerBuiltinApps({ appRuntime, shell, processManager }) {
   });
 
   appRuntime.register({ id: 'terminal', name: 'Terminal', icon: '🖥️', permissions: ['fs.read', 'fs.write', 'proc.read'], window: { width: 840, height: 520 } }, async (root) => {
-    root.innerHTML = `<div class='tabs'><button id='newTab'>+</button></div><pre class='terminal-output' id='out'></pre><div class='row'><input id='cmd' placeholder='Type command...'/><button id='run'>Run</button></div>`;
+    root.innerHTML = `
+      <div class='terminal-app'>
+        <div class='terminal-topbar'>
+          <div class='terminal-title'>LocalOS Shell</div>
+          <div class='terminal-actions'>
+            <button data-snippet='help'>help</button>
+            <button data-snippet='ls'>ls</button>
+            <button data-snippet='tree'>tree</button>
+            <button data-snippet='ps'>ps</button>
+            <button id='clearView'>clear view</button>
+          </div>
+        </div>
+        <pre class='terminal-output' id='out'></pre>
+        <div class='terminal-status'>
+          <span id='cwdPill'></span>
+          <span id='codePill'>exit: 0</span>
+        </div>
+        <div class='terminal-cli'>
+          <span id='prompt'></span>
+          <input id='cmd' spellcheck='false' placeholder='Type command, ↑/↓ history, Tab autocomplete' />
+        </div>
+      </div>`;
     const out = root.querySelector('#out');
     const cmd = root.querySelector('#cmd');
-    const exec = async () => {
-      const line = cmd.value;
-      out.textContent += `$ ${line}\n`;
-      try {
-        const res = await shell.run(line);
-        out.textContent += res.output;
-      } catch (e) {
-        out.textContent += `error: ${e.message}\n`;
+    const prompt = root.querySelector('#prompt');
+    const cwdPill = root.querySelector('#cwdPill');
+    const codePill = root.querySelector('#codePill');
+    let historyIndex = shell.history.length;
+
+    const redrawPrompt = () => {
+      prompt.textContent = `${shell.prompt()} `;
+      cwdPill.textContent = shell.cwd;
+    };
+    const print = (line = '') => {
+      if (line === '\u001b[2J\u001b[H') {
+        out.textContent = '';
+        return;
       }
-      cmd.value = '';
+      out.textContent += line;
       out.scrollTop = out.scrollHeight;
     };
-    root.querySelector('#run').onclick = exec;
-    cmd.addEventListener('keydown', (e) => e.key === 'Enter' && exec());
+
+    const exec = async () => {
+      const line = cmd.value;
+      if (!line.trim()) return;
+      print(`${shell.prompt()} ${line}\n`);
+      try {
+        const res = await shell.run(line);
+        print(res.output);
+        codePill.textContent = `exit: ${res.code}`;
+      } catch (e) {
+        print(`error: ${e.message}\n`);
+        codePill.textContent = 'exit: 1';
+      }
+      cmd.value = '';
+      historyIndex = shell.history.length;
+      redrawPrompt();
+    };
+
+    cmd.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter') {
+        await exec();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (historyIndex <= 0) return;
+        historyIndex--;
+        cmd.value = shell.history[historyIndex] || '';
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (historyIndex >= shell.history.length) return;
+        historyIndex++;
+        cmd.value = shell.history[historyIndex] || '';
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        const tokens = cmd.value.trim().split(/\s+/);
+        const needle = tokens[tokens.length - 1] || '';
+        const commandMatches = [...shell.commands.keys()].filter((name) => name.startsWith(needle));
+        if (tokens.length === 1 && commandMatches.length === 1) {
+          cmd.value = `${commandMatches[0]} `;
+          return;
+        }
+        try {
+          const entries = await shell.vfs.list(shell.cwd);
+          const fileMatches = entries.map((e) => e.path.split('/').pop()).filter((name) => name.startsWith(needle));
+          if (fileMatches.length === 1) {
+            tokens[tokens.length - 1] = fileMatches[0];
+            cmd.value = `${tokens.join(' ')} `;
+          } else if (fileMatches.length > 1) {
+            print(`${fileMatches.join('    ')}\n`);
+          } else if (commandMatches.length > 1) {
+            print(`${commandMatches.join('    ')}\n`);
+          }
+        } catch {}
+      }
+    });
+
+    root.querySelector('#clearView').onclick = () => {
+      out.textContent = '';
+      cmd.focus();
+    };
+    root.querySelectorAll('[data-snippet]').forEach((button) => {
+      button.onclick = () => {
+        cmd.value = button.dataset.snippet || '';
+        cmd.focus();
+      };
+    });
+    redrawPrompt();
+    print('Welcome to LocalOS shell. Run `help` to view available commands.\n');
+    print(`Session started at ${new Date().toLocaleTimeString()}.\n\n`);
+    cmd.focus();
   });
 
   appRuntime.register({ id: 'editor', name: 'Text Editor', icon: '📝', permissions: ['fs.read', 'fs.write'], window: { width: 920, height: 600 } }, async (root, ctx) => {
