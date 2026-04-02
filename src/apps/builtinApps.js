@@ -88,4 +88,214 @@ export function registerBuiltinApps({ appRuntime, shell, processManager }) {
     render();
     setInterval(render, 1500);
   });
+
+  appRuntime.register({ id: 'appstudio', name: 'App Studio', icon: '🧪', permissions: ['fs.read', 'fs.write'], window: { width: 1100, height: 700 } }, async (root, ctx) => {
+    root.innerHTML = `
+      <div class='row'>
+        <input id='projectPath' value='/home/guest/apps/my-first-app.localapp.json' />
+        <button id='newProject'>New</button>
+        <button id='loadProject'>Load</button>
+        <button id='saveProject'>Save</button>
+        <button id='runPreview'>Run Preview</button>
+      </div>
+      <div class='row' style='margin-top:.5rem'>
+        <input id='assetName' placeholder='Asset key (logo, ding, etc)' />
+        <input id='assetUrl' placeholder='Asset URL or data URL' />
+        <button id='addAsset'>Add Asset</button>
+      </div>
+      <div class='split' style='margin-top:.7rem'>
+        <div>
+          <label>HTML</label>
+          <textarea id='htmlEditor'></textarea>
+          <label>CSS</label>
+          <textarea id='cssEditor'></textarea>
+        </div>
+        <div>
+          <label>JavaScript</label>
+          <textarea id='jsEditor'></textarea>
+          <div class='row' style='margin-top:.5rem'>
+            <button id='insertExample'>Insert LocalOS API Example</button>
+          </div>
+          <p style='margin:.5rem 0'>Assets</p>
+          <pre id='assetsPreview'></pre>
+          <p style='margin:.5rem 0'>Console</p>
+          <pre id='studioLog' class='terminal-output' style='min-height:180px'></pre>
+        </div>
+      </div>
+      <iframe id='previewFrame' sandbox='allow-scripts'></iframe>
+    `;
+
+    const defaults = () => ({
+      name: 'My LocalOS App',
+      html: '<main><h1>Hello from App Studio</h1><p id="status">Ready.</p><button id="save">Write to LocalOS</button><img id="logo" style="max-width:160px;display:none" /></main>',
+      css: 'body{font-family:Inter,system-ui;background:#020617;color:#e2e8f0;padding:1rem}main{background:#0f172a;border:1px solid #334155;border-radius:.75rem;padding:1rem}button{margin-top:.6rem}',
+      js: `const status = document.getElementById('status');
+const log = (...msg) => parent.postMessage({ type: 'localos-log', message: msg.join(' ') }, '*');
+document.getElementById('save').onclick = async () => {
+  await LocalOS.fs.writeFile('/home/guest/Documents/studio-output.txt', 'Saved from App Studio');
+  status.textContent = 'Saved /home/guest/Documents/studio-output.txt';
+  log('Saved file to LocalOS VFS');
+};
+
+const logoUrl = await LocalOS.assets.getUrl('logo');
+if (logoUrl) {
+  const logo = document.getElementById('logo');
+  logo.src = logoUrl;
+  logo.style.display = 'block';
+}
+`,
+      assets: {},
+    });
+
+    let project = defaults();
+
+    const htmlEditor = root.querySelector('#htmlEditor');
+    const cssEditor = root.querySelector('#cssEditor');
+    const jsEditor = root.querySelector('#jsEditor');
+    const assetsPreview = root.querySelector('#assetsPreview');
+    const frame = root.querySelector('#previewFrame');
+    const logEl = root.querySelector('#studioLog');
+
+    const renderEditors = () => {
+      htmlEditor.value = project.html;
+      cssEditor.value = project.css;
+      jsEditor.value = project.js;
+      assetsPreview.textContent = JSON.stringify(project.assets, null, 2);
+    };
+
+    const syncProject = () => {
+      project.html = htmlEditor.value;
+      project.css = cssEditor.value;
+      project.js = jsEditor.value;
+    };
+
+    const appendLog = (line) => {
+      logEl.textContent += `${line}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+    };
+
+    const buildPreviewDoc = () => `<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <style>${project.css}</style>
+  </head>
+  <body>
+    ${project.html}
+    <script>
+      (() => {
+        const pending = new Map();
+        const callHost = (method, args = []) => {
+          const id = crypto.randomUUID();
+          parent.postMessage({ type: 'localos-api', id, method, args }, '*');
+          return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+        };
+        window.addEventListener('message', (event) => {
+          const data = event.data || {};
+          if (data.type !== 'localos-api-result' || !pending.has(data.id)) return;
+          const pendingCall = pending.get(data.id);
+          pending.delete(data.id);
+          if (data.error) pendingCall.reject(new Error(data.error));
+          else pendingCall.resolve(data.result);
+        });
+        window.LocalOS = {
+          fs: {
+            readFile: (path) => callHost('fs.readFile', [path]),
+            writeFile: (path, content) => callHost('fs.writeFile', [path, content]),
+            mkdir: (path) => callHost('fs.mkdir', [path]),
+            list: (path) => callHost('fs.list', [path]),
+          },
+          assets: {
+            getUrl: (name) => callHost('assets.getUrl', [name]),
+            list: () => callHost('assets.list', []),
+          },
+          notify: (msg) => parent.postMessage({ type: 'localos-log', message: String(msg) }, '*'),
+        };
+      })();
+    </script>
+    <script type="module">
+${project.js}
+    </script>
+  </body>
+</html>`;
+
+    const runPreview = () => {
+      syncProject();
+      frame.srcdoc = buildPreviewDoc();
+      appendLog('Preview refreshed');
+    };
+
+    window.addEventListener('message', async (event) => {
+      if (event.source !== frame.contentWindow) return;
+      const data = event.data || {};
+      if (data.type === 'localos-log') {
+        appendLog(`[app] ${data.message}`);
+        return;
+      }
+      if (data.type !== 'localos-api') return;
+      const reply = { type: 'localos-api-result', id: data.id };
+      try {
+        if (data.method === 'fs.readFile') reply.result = await ctx.fs.readFile(data.args[0], ctx.appId);
+        else if (data.method === 'fs.writeFile') {
+          await ctx.fs.writeFile(data.args[0], data.args[1], ctx.appId);
+          reply.result = true;
+        } else if (data.method === 'fs.mkdir') {
+          await ctx.fs.mkdir(data.args[0], ctx.appId);
+          reply.result = true;
+        } else if (data.method === 'fs.list') {
+          reply.result = await ctx.fs.list(data.args[0]);
+        } else if (data.method === 'assets.getUrl') {
+          reply.result = project.assets[data.args[0]] ?? '';
+        } else if (data.method === 'assets.list') {
+          reply.result = Object.keys(project.assets);
+        } else {
+          throw new Error(`Unknown LocalOS API method: ${data.method}`);
+        }
+      } catch (error) {
+        reply.error = error.message;
+      }
+      frame.contentWindow?.postMessage(reply, '*');
+    });
+
+    root.querySelector('#newProject').onclick = () => {
+      project = defaults();
+      renderEditors();
+      runPreview();
+      appendLog('New project created');
+    };
+
+    root.querySelector('#saveProject').onclick = async () => {
+      syncProject();
+      const path = root.querySelector('#projectPath').value;
+      await ctx.fs.writeFile(path, JSON.stringify(project, null, 2), ctx.appId);
+      appendLog(`Saved project to ${path}`);
+    };
+
+    root.querySelector('#loadProject').onclick = async () => {
+      const path = root.querySelector('#projectPath').value;
+      const raw = await ctx.fs.readFile(path, ctx.appId);
+      const parsed = JSON.parse(raw);
+      project = { ...defaults(), ...parsed, assets: parsed.assets || {} };
+      renderEditors();
+      runPreview();
+      appendLog(`Loaded project ${path}`);
+    };
+
+    root.querySelector('#runPreview').onclick = runPreview;
+    root.querySelector('#insertExample').onclick = () => {
+      jsEditor.value += `\n// Example: list user documents\nconst docs = await LocalOS.fs.list('/home/guest/Documents');\nLocalOS.notify('Found ' + docs.length + ' entries in Documents');\n`;
+      syncProject();
+    };
+    root.querySelector('#addAsset').onclick = () => {
+      const name = root.querySelector('#assetName').value.trim();
+      const url = root.querySelector('#assetUrl').value.trim();
+      if (!name || !url) return;
+      project.assets[name] = url;
+      assetsPreview.textContent = JSON.stringify(project.assets, null, 2);
+      appendLog(`Added asset ${name}`);
+    };
+
+    renderEditors();
+    runPreview();
+  });
 }
