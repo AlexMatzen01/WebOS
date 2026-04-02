@@ -32,11 +32,20 @@ export class AppRuntime {
     if (!await this.checkPermissions(manifest)) return;
     const root = document.createElement('div');
     root.className = 'app-root';
+    const scopedFs = {
+      readFile: (path) => this.vfs.readFile(path, appId),
+      writeFile: (path, content) => this.vfs.writeFile(path, content, appId),
+      mkdir: (path) => this.vfs.mkdir(path, appId),
+      list: (path) => this.vfs.list(path),
+      get: (path, opts) => this.vfs.get(path, opts),
+      symlink: (target, path) => this.vfs.symlink(target, path, appId),
+    };
+
     const ctx = {
       appId,
       manifest,
       bus: this.bus,
-      fs: this.vfs,
+      fs: scopedFs,
       background: (fn) => {
         const proc = this.pm.spawn({ name: `${appId}:service`, background: true, type: 'service' });
         fn(() => this.pm.kill(proc.pid));
