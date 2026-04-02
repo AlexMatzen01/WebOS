@@ -79,10 +79,23 @@ export class VFS {
     return acl.includes(mode);
   }
 
+  getMountMeta(path) {
+    const candidates = [...this.mounts.keys()].sort((a, b) => b.length - a.length);
+    const mount = candidates.find((root) => path === root || path.startsWith(`${root}/`));
+    return mount ? this.mounts.get(mount) : null;
+  }
+
+  ensureWritable(path) {
+    const mount = this.getMountMeta(path);
+    if (mount?.type === 'readonly') throw new Error('Read-only filesystem');
+  }
+
   async writeFile(path, content, appId = '*') {
     path = norm(path);
     const parent = await this.get(path.split('/').slice(0, -1).join('/') || '/');
     if (!parent || parent.type !== 'dir') throw new Error('Parent not dir');
+    this.ensureWritable(path);
+    if (!this.canAccess(parent, appId, 'w')) throw new Error('Permission denied');
 
     const existing = await this.get(path, { followLinks: false });
     const data = {
@@ -119,6 +132,7 @@ export class VFS {
     const parentPath = path.split('/').slice(0, -1).join('/') || '/';
     const parent = await this.get(parentPath);
     if (!parent || parent.type !== 'dir') throw new Error('Parent not found');
+    this.ensureWritable(path);
     if (!this.canAccess(parent, appId, 'w')) throw new Error('Permission denied');
     const existing = await this.get(path, { followLinks: false });
     if (existing) return;
@@ -128,11 +142,17 @@ export class VFS {
     await this.put(parent);
   }
 
-  async symlink(target, path) {
+  async symlink(target, path, appId = '*') {
     path = norm(path);
     const parent = await this.get(path.split('/').slice(0, -1).join('/') || '/');
+    if (!parent || parent.type !== 'dir') throw new Error('Parent not dir');
+    this.ensureWritable(path);
+    if (!this.canAccess(parent, appId, 'w')) throw new Error('Permission denied');
+    const existing = await this.get(path, { followLinks: false });
+    if (existing) throw new Error('Path exists');
     const node = { path, type: 'symlink', target: norm(target), createdAt: now(), updatedAt: now(), permissions: { '*': 'rwx' }, owner: 'guest' };
     parent.children.push(path);
+    parent.updatedAt = now();
     await this.put(node);
     await this.put(parent);
   }
